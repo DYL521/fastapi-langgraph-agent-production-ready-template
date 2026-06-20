@@ -215,7 +215,7 @@ Recommended but not required. `make docker-up` starts the API + PostgreSQL toget
 Any provider that exposes an OpenAI-compatible chat completions API. The `LLMRegistry` in `src/agent/services/llm/registry.py` is built on `langchain_openai.ChatOpenAI`, so Atlas Cloud, OpenAI, and similar endpoints work out of the box. Configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `DEFAULT_LLM_MODEL` in `.env.development`.
 
 **Can I use MySQL instead of PostgreSQL?**
-Yes. Set `DB_DIALECT=mysql` and use `.env.mysql.example` as your starting point. MySQL 8+ is required. Install the extra drivers with `uv sync --extra mysql`, then start the stack with `COMPOSE_PROFILES=mysql make stack-up`. The checkpointer switches to `AIOMySQLSaver` and long-term memory defaults to Weaviate. See [docs/database.md](docs/database.md) and [docs/multi-database-design.md](docs/multi-database-design.md).
+Yes. Set `DB_DIALECT=mysql` and use `.env.mysql.example` as your starting point. MySQL 8+ is required. Install the extra drivers with `uv sync --extra mysql`, then start the stack with `COMPOSE_PROFILES=mysql make stack-up`. The checkpointer switches to `AIOMySQLSaver` and long-term memory defaults to Weaviate. See [docs/database.md](docs/database.md).
 
 **How do I configure long-term memory?**
 Long-term memory is self-hosted: mem0 runs in-process. On PostgreSQL it uses pgvector in the same database; on MySQL it uses a standalone Weaviate instance. Set `VECTOR_STORE_PROVIDER` (or let it default from `DB_DIALECT`) and the matching connection vars. You only need a working `OPENAI_API_KEY` (used for fact extraction + embeddings). See [docs/memory.md](docs/memory.md) for details.

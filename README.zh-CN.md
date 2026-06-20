@@ -215,7 +215,7 @@ LangGraph 的基础快速上手到"Agent 能在本地跑起来"就停了。本�
 任何提供 OpenAI 兼容对话接口的提供商都可以。`src/agent/services/llm/registry.py` 中的 `LLMRegistry` 基于 `langchain_openai.ChatOpenAI`，因此 Atlas Cloud、OpenAI 等端点开箱即用。在 `.env.development` 中配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY` 和 `DEFAULT_LLM_MODEL`。
 
 **可以用 MySQL 替代 PostgreSQL 吗？**
-可以。设置 `DB_DIALECT=mysql`，并以 `.env.mysql.example` 为起点。需要 MySQL 8+。安装额外驱动：`uv sync --extra mysql`，然后用 `COMPOSE_PROFILES=mysql make stack-up` 启动完整栈。此时 checkpointer 切换为 `AIOMySQLSaver`，长期记忆默认使用 Weaviate。详见 [docs/database.md](docs/database.md) 与 [docs/multi-database-design.md](docs/multi-database-design.md)。
+可以。设置 `DB_DIALECT=mysql`，并以 `.env.mysql.example` 为起点。需要 MySQL 8+。安装额外驱动：`uv sync --extra mysql`，然后用 `COMPOSE_PROFILES=mysql make stack-up` 启动完整栈。此时 checkpointer 切换为 `AIOMySQLSaver`，长期记忆默认使用 Weaviate。详见 [docs/database.md](docs/database.md)。
 
 **如何配置长期记忆？**
 长期记忆是自托管的：mem0 在进程内运行。PostgreSQL 环境下使用同一数据库的 pgvector；MySQL 环境下使用独立 Weaviate 实例。设置 `VECTOR_STORE_PROVIDER`（或让 `DB_DIALECT` 自动推导）以及对应连接参数。你只需要一个可用的 `OPENAI_API_KEY`（用于事实抽取 + 向量化）。详见 [docs/memory.md](docs/memory.md)。
