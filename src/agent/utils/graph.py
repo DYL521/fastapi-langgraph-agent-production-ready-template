@@ -10,7 +10,7 @@ from agent.schemas import Message
 
 # Cache tiktoken encoding at module level — thread-safe and reusable
 try:
-    _TIKTOKEN_ENCODING = tiktoken.encoding_for_model(settings.DEFAULT_LLM_MODEL)
+    _TIKTOKEN_ENCODING = tiktoken.encoding_for_model(settings.llm.model)
 except KeyError:
     _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
 
@@ -117,7 +117,7 @@ def prepare_messages(messages: list[Message], system_prompt: str) -> list[Messag
             dump_messages(messages),
             strategy="last",
             token_counter=_count_tokens_tiktoken,
-            max_tokens=settings.MAX_TOKENS,
+            max_tokens=settings.llm.max_tokens,
             start_on="human",
             include_system=False,
             allow_partial=False,

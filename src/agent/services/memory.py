@@ -1,4 +1,4 @@
-"""Long-term memory service using mem0 and pgvector with optional cache layer."""
+"""Long-term memory service using mem0 with a configurable vector store and optional cache layer."""
 
 from mem0 import AsyncMemory
 
@@ -7,11 +7,12 @@ from agent.core.cache import (
     cache_service,
 )
 from agent.core.config import settings
+from agent.core.db import get_vector_store_config
 from agent.core.logging import logger
 
 
 class MemoryService:
-    """Service for managing long-term memory using mem0 and pgvector."""
+    """Service for managing long-term memory using mem0 and a configurable vector store."""
 
     def __init__(self):
         """Initialize the memory service."""
@@ -21,24 +22,14 @@ class MemoryService:
         if self._memory is None:
             self._memory = await AsyncMemory.from_config(
                 config_dict={
-                    "vector_store": {
-                        "provider": "pgvector",
-                        "config": {
-                            "collection_name": settings.LONG_TERM_MEMORY_COLLECTION_NAME,
-                            "dbname": settings.POSTGRES_DB,
-                            "user": settings.POSTGRES_USER,
-                            "password": settings.POSTGRES_PASSWORD,
-                            "host": settings.POSTGRES_HOST,
-                            "port": settings.POSTGRES_PORT,
-                        },
-                    },
+                    "vector_store": get_vector_store_config(),
                     "llm": {
                         "provider": "openai",
-                        "config": {"model": settings.LONG_TERM_MEMORY_MODEL},
+                        "config": {"model": settings.memory.model},
                     },
                     "embedder": {
                         "provider": "openai",
-                        "config": {"model": settings.LONG_TERM_MEMORY_EMBEDDER_MODEL},
+                        "config": {"model": settings.memory.embedder_model},
                     },
                 }
             )
@@ -81,8 +72,8 @@ class MemoryService:
                 await cache_service.set(key, result)
 
             return result
-        except Exception as e:
-            logger.error("failed_to_get_relevant_memory", error=str(e), user_id=user_id, query=query)
+        except Exception:
+            logger.exception("failed_to_get_relevant_memory", user_id=user_id, query=query)
             return ""
 
     async def add(self, user_id: str | None, messages: list[dict], metadata: dict | None = None) -> None:
