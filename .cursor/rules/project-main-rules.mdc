@@ -45,11 +45,11 @@ This is an AI agent application that:
 ## LangGraph & LangChain Integration
 
 - Use LangGraph `StateGraph` for building AI agent workflows with multiple steps/nodes
-- Define clear state schemas using Pydantic models (see `app/schemas/graph.py`)
+- Define clear state schemas using Pydantic models (see `src/agent/schemas/graph.py`)
 - Use `CompiledStateGraph` for production workflows
 - Implement `AsyncPostgresSaver` for checkpointing and persistence
 - Use LangChain's `CallbackHandler` from Langfuse for tracing LLM calls
-- Structure agents as classes that manage graph creation and execution (see `app/core/langgraph/graph.py`)
+- Structure agents as classes that manage graph creation and execution (see `src/agent/core/langgraph/graph.py`)
 - Use `Command` for controlling graph flow between nodes
 - Implement proper streaming responses for long-running agent operations
 
@@ -135,12 +135,12 @@ Core dependencies in this project:
 - Apply rate limiting decorators to all endpoints: `@limiter.limit(settings.RATE_LIMIT_ENDPOINTS["endpoint_name"][0])`
 - Use middleware for logging context, metrics, and error handling
 - Implement proper CORS configuration via settings
-- Structure routes in versioned API modules (e.g., `app/api/v1/`)
+- Structure routes in versioned API modules (e.g., `src/agent/api/v1/`)
 
 ## Authentication & Security
 
 - Use JWT tokens for authentication
-- Implement session-based user management (see `app/api/v1/auth.py`)
+- Implement session-based user management (see `src/agent/api/v1/auth.py`)
 - Use `get_current_session` dependency for protected endpoints
 - Store sensitive data in environment variables, never in code
 - Implement proper CORS and rate limiting
@@ -149,7 +149,7 @@ Core dependencies in this project:
 ## Database & Persistence
 
 - Use SQLModel for ORM models (combines SQLAlchemy + Pydantic)
-- Define models in `app/models/` directory
+- Define models in `src/agent/models/` directory
 - Use async database operations with asyncpg
 - Implement proper connection pooling
 - Use LangGraph's AsyncPostgresSaver for agent checkpointing
@@ -184,7 +184,7 @@ Core dependencies in this project:
 ## Configuration Management
 
 - Use environment-specific configuration files (`.env.development`, `.env.staging`, `.env.production`)
-- Use Pydantic Settings for type-safe configuration (see `app/core/config.py`)
+- Use Pydantic Settings for type-safe configuration (see `src/agent/core/config.py`)
 - Define environment enum for environment-specific behavior
 - Never hardcode secrets or API keys
 - Use appropriate defaults for development environments
@@ -205,7 +205,7 @@ Core dependencies in this project:
 ## Project Structure
 
 ```markdown
-app/
+src/agent/
 ├── api/v1/          # API routes (auth, chatbot, etc.)
 ├── core/            # Core functionality (config, logging, metrics, middleware)
 │   ├── langgraph/   # LangGraph agent and tools

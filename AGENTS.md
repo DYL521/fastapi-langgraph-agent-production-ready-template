@@ -24,7 +24,7 @@ make stack-up ENV=development  # Full stack: API + DB + Prometheus + Grafana
 ## Project Structure
 
 ```
-app/
+src/agent/
   api/v1/          # Route handlers (auth.py, chatbot.py, api.py)
   core/
     config.py      # Pydantic Settings config
@@ -105,7 +105,7 @@ This is a production-ready AI agent application built with:
 
 ### Graph Structure
 - Use `StateGraph` for building AI agent workflows
-- Define clear state schemas using Pydantic models (see `app/schemas/graph.py`)
+- Define clear state schemas using Pydantic models (see `src/agent/schemas/graph.py`)
 - Use `CompiledStateGraph` for production workflows
 - Implement `AsyncPostgresSaver` for checkpointing and persistence
 - Use `Command` for controlling graph flow between nodes
@@ -122,7 +122,7 @@ This is a production-ready AI agent application built with:
 ## Authentication & Security
 
 - Use JWT tokens for authentication
-- Implement session-based user management (see `app/api/v1/auth.py`)
+- Implement session-based user management (see `src/agent/api/v1/auth.py`)
 - Use `get_current_session` dependency for protected endpoints
 - Store sensitive data in environment variables
 - Validate all user inputs with Pydantic models
@@ -130,7 +130,7 @@ This is a production-ready AI agent application built with:
 ## Database Operations
 
 - Use SQLModel for ORM models (combines SQLAlchemy + Pydantic)
-- Define models in `app/models/` directory
+- Define models in `src/agent/models/` directory
 - Use async database operations with asyncpg
 - Use LangGraph's AsyncPostgresSaver for agent checkpointing
 
@@ -159,7 +159,7 @@ This is a production-ready AI agent application built with:
 ## Configuration Management
 
 - Use environment-specific configuration files (`.env.development`, `.env.staging`, `.env.production`)
-- Use Pydantic Settings for type-safe configuration (see `app/core/config.py`)
+- Use Pydantic Settings for type-safe configuration (see `src/agent/core/config.py`)
 - Never hardcode secrets or API keys
 
 ## Key Dependencies

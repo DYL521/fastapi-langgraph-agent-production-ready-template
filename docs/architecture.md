@@ -117,11 +117,11 @@ graph LR
 
 | Component | File | Responsibility |
 |---|---|---|
-| LangGraph Agent | `app/core/langgraph/graph.py` | Orchestrates the conversation loop |
-| LLM Service | `app/services/llm/` | Model registry, retries, circular fallback, structured output |
-| Memory Service | `app/services/memory.py` | mem0 semantic memory + cache |
-| Session Naming | `app/services/session_naming.py` | Background LLM title generation for new sessions |
-| Database Service | `app/services/database.py` | User/session CRUD |
-| Cache Service | `app/core/cache.py` | Valkey/Redis with in-memory fallback |
-| Middleware | `app/core/middleware.py` | Metrics, logging context, profiling |
-| Auth | `app/api/v1/auth.py` | JWT creation, session management |
+| LangGraph Agent | `src/agent/core/langgraph/graph.py` | Orchestrates the conversation loop |
+| LLM Service | `src/agent/services/llm/` | Model registry, retries, circular fallback, structured output |
+| Memory Service | `src/agent/services/memory.py` | mem0 semantic memory + cache |
+| Session Naming | `src/agent/services/session_naming.py` | Background LLM title generation for new sessions |
+| Database Service | `src/agent/services/database.py` | User/session CRUD |
+| Cache Service | `src/agent/core/cache.py` | Valkey/Redis with in-memory fallback |
+| Middleware | `src/agent/core/middleware.py` | Metrics, logging context, profiling |
+| Auth | `src/agent/api/v1/auth.py` | JWT creation, session management |

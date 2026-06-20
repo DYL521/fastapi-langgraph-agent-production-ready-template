@@ -48,4 +48,4 @@ RUN echo "Using ${APP_ENV} environment"
 
 # Command to run the application
 ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
-CMD ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/.venv/bin/uvicorn", "agent.main:app", "--host", "0.0.0.0", "--port", "8000"]

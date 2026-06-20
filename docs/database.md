@@ -53,7 +53,7 @@ make migrate              # applies all migrations to the database
 ### Creating a migration after model changes
 
 ```bash
-# 1. Edit your SQLModel model (app/models/)
+# 1. Edit your SQLModel model (src/agent/models/)
 # 2. Generate the migration
 make migration MSG="add phone number to user"
 
@@ -69,7 +69,7 @@ make migrate-downgrade    # roll back the last migration
 make migrate-history      # show the full migration history
 ```
 
-Alembic reads DB credentials from your `.env` file (via `app/core/config.py`). Make sure the correct `APP_ENV` is set before running migrations.
+Alembic reads DB credentials from your `.env` file (via `src/agent/core/config.py`). Make sure the correct `APP_ENV` is set before running migrations.
 
 ### How autogenerate works
 
@@ -79,7 +79,7 @@ External tables (LangGraph checkpointer, mem0, pgvector) are excluded via `inclu
 
 ### Adding a new model
 
-1. Create `app/models/your_model.py`
+1. Create `src/agent/models/your_model.py`
 2. Import it in `alembic/env.py` alongside the other model imports
 3. Run `make migration MSG="add your_model table"`
 

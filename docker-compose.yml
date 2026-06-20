@@ -46,7 +46,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/app/app
+      - ./src:/app/src
       - ./logs:/app/logs
     env_file:
       - .env.${APP_ENV:-development}

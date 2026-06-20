@@ -36,7 +36,7 @@ install:
 # Server
 # ---------------------------------------------------------------------------
 dev:
-	@$(call run_with_env,uv run uvicorn app.main:app --reload --port 8000)
+	@$(call run_with_env,uv run uvicorn agent.main:app --reload --port 8000)
 
 staging:
 	@$(call run_with_env,$(MAKE) _serve ENV=staging)
@@ -45,7 +45,7 @@ prod:
 	@$(call run_with_env,$(MAKE) _serve ENV=production)
 
 _serve:
-	@$(call run_with_env,./.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --loop uvloop)
+	@$(call run_with_env,./.venv/bin/python -m uvicorn agent.main:app --host 0.0.0.0 --port 8000 --loop uvloop)
 
 # ---------------------------------------------------------------------------
 # Database migrations
