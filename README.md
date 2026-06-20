@@ -127,7 +127,9 @@ This works as a drop-in replacement anywhere `ChatOpenAI` is used in your LangGr
 ## What's included
 
 - **LangGraph** stateful agent with checkpointing, tool calling, and human-in-the-loop support
-- **Long-term memory** via mem0 + pgvector — semantic search per user, cache-backed
+- **Multi-database backend** — PostgreSQL + pgvector (default) or MySQL 8+ + Weaviate, selected by `DB_DIALECT`
+- **Repository pattern** with FastAPI dependency injection for clean, testable data access
+- **Long-term memory** via mem0 — pgvector (PostgreSQL) or Weaviate (MySQL), semantic search per user, cache-backed
 - **LLM service** with circular model fallback, exponential backoff retries, and total timeout budget
 - **Langfuse** tracing on all LLM calls; Prometheus metrics + Grafana dashboards
 - **JWT auth** with session management; rate limiting via slowapi
@@ -155,7 +157,7 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs) to see the interac
 | [Architecture](docs/architecture.md) | System design, request flow, component diagrams |
 | [Configuration](docs/configuration.md) | All environment variables with defaults |
 | [Authentication](docs/authentication.md) | JWT flow, sessions, endpoint reference |
-| [Database & Migrations](docs/database.md) | Schema, Alembic migrations, pgvector |
+| [Database & Migrations](docs/database.md) | Schema, Alembic migrations, PostgreSQL/MySQL + pgvector/Weaviate |
 | [LLM Service](docs/llm-service.md) | Models, retries, fallback, timeout budget |
 | [Memory](docs/memory.md) | mem0 long-term memory, cache layer |
 | [Observability](docs/observability.md) | Langfuse, structured logging, Prometheus, profiling |
@@ -166,17 +168,20 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs) to see the interac
 
 ```
 src/agent/
-  api/v1/          # Route handlers
+  api/v1/          # Route handlers + FastAPI dependencies
   core/
     langgraph/     # Agent graph + tools
     prompts/       # System prompt template
+    config/        # Domain-specific Pydantic settings
+    db/            # Dialect-aware DB factories (URL, checkpointer, vector store)
     cache.py       # Valkey/Redis + in-memory fallback
-    config.py      # Settings
     middleware.py  # Metrics, logging context, profiling
     limiter.py     # Rate limiting
   models/          # SQLModel ORM models
+  repositories/    # User/session repository layer
   schemas/         # Pydantic request/response schemas
   services/        # LLM, database, memory services
+  utils/           # Auth/graph helpers
 alembic/           # Database migrations
 evals/             # LLM evaluation framework
 ```
@@ -199,7 +204,7 @@ See [LICENSE](LICENSE).
 A production-ready foundation for AI agent backends built on FastAPI + LangGraph. It bundles the components you'd otherwise wire up by hand: stateful conversations, long-term memory, tool calling, observability, rate limiting, and JWT auth.
 
 **How does this differ from a basic LangGraph setup?**
-The base LangGraph quickstart stops at "agent runs locally". This template adds Alembic migrations, mem0 + pgvector long-term memory, Langfuse tracing, Prometheus + Grafana dashboards, JWT sessions, slowapi rate limiting, structured logging with per-request context, and a circular-fallback LLM service — production concerns you'd otherwise build separately.
+The base LangGraph quickstart stops at "agent runs locally". This template adds Alembic migrations, multi-database support (PostgreSQL/MySQL), mem0 long-term memory with pgvector or Weaviate, Langfuse tracing, Prometheus + Grafana dashboards, JWT sessions, slowapi rate limiting, structured logging with per-request context, repository pattern with dependency injection, and a circular-fallback LLM service — production concerns you'd otherwise build separately.
 
 ### Setup & Configuration
 
@@ -207,10 +212,13 @@ The base LangGraph quickstart stops at "agent runs locally". This template adds 
 Recommended but not required. `make docker-up` starts the API + PostgreSQL together. For local-only setup see [docs/getting-started.md](docs/getting-started.md).
 
 **Which LLM providers are supported?**
-Today: **OpenAI only** via the `LLMRegistry` in `src/agent/services/llm/registry.py`. Multi-provider support (Anthropic, Google, OpenRouter) via LangChain's `init_chat_model` is planned — see [#51](https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template/issues/51). Configure your model via `DEFAULT_LLM_MODEL` in `.env.development`.
+Any provider that exposes an OpenAI-compatible chat completions API. The `LLMRegistry` in `src/agent/services/llm/registry.py` is built on `langchain_openai.ChatOpenAI`, so Atlas Cloud, OpenAI, and similar endpoints work out of the box. Configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `DEFAULT_LLM_MODEL` in `.env.development`.
+
+**Can I use MySQL instead of PostgreSQL?**
+Yes. Set `DB_DIALECT=mysql` and use `.env.mysql.example` as your starting point. MySQL 8+ is required. Install the extra drivers with `uv sync --extra mysql`, then start the stack with `COMPOSE_PROFILES=mysql make stack-up`. The checkpointer switches to `AIOMySQLSaver` and long-term memory defaults to Weaviate. See [docs/database.md](docs/database.md) and [docs/multi-database-design.md](docs/multi-database-design.md).
 
 **How do I configure long-term memory?**
-Long-term memory is self-hosted: mem0 runs in-process and persists into your existing PostgreSQL via pgvector — there is no separate mem0 cloud account or API key. You only need a working `OPENAI_API_KEY` (used for fact extraction + embeddings) and the pgvector extension enabled. See [docs/memory.md](docs/memory.md) for details.
+Long-term memory is self-hosted: mem0 runs in-process. On PostgreSQL it uses pgvector in the same database; on MySQL it uses a standalone Weaviate instance. Set `VECTOR_STORE_PROVIDER` (or let it default from `DB_DIALECT`) and the matching connection vars. You only need a working `OPENAI_API_KEY` (used for fact extraction + embeddings). See [docs/memory.md](docs/memory.md) for details.
 
 ### Development
 
@@ -226,12 +234,14 @@ Yes. Set `LANGFUSE_TRACING_ENABLED=false` (or omit the Langfuse keys). The agent
 ### Troubleshooting
 
 **The API won't start**
-- Ensure PostgreSQL is running (`make docker-up` brings it up alongside the API)
-- Confirm `.env.development` exists — copy from `.env.example` and fill in required keys
+- Ensure the database is running (`make docker-up` brings up PostgreSQL by default; use `COMPOSE_PROFILES=mysql make stack-up` for MySQL + Weaviate)
+- Confirm `.env.development` exists — copy from `.env.example` (PostgreSQL) or `.env.mysql.example` (MySQL), and fill in required keys
+- Set `DB_DIALECT=postgres` or `DB_DIALECT=mysql` to match your backend
 - Apply migrations: `make migrate`
 
 **Memory / semantic search returns nothing**
-- Verify the `pgvector` extension is enabled in your PostgreSQL instance
+- PostgreSQL: verify the `pgvector` extension is enabled
+- MySQL: verify Weaviate is running and `WEAVIATE_CLUSTER_URL` is correct
 - Confirm `OPENAI_API_KEY` is valid (mem0 calls OpenAI for fact extraction + embeddings)
 - Check `LONG_TERM_MEMORY_MODEL` and `LONG_TERM_MEMORY_EMBEDDER_MODEL` are set in `.env.development`
 
