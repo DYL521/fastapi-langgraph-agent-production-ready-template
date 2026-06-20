@@ -32,7 +32,7 @@ def create_access_token(thread_id: str, expires_delta: Optional[timedelta] = Non
     if expires_delta:
         expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(UTC) + timedelta(days=settings.JWT_ACCESS_TOKEN_EXPIRE_DAYS)
+        expire = datetime.now(UTC) + timedelta(days=settings.jwt.access_token_expire_days)
 
     to_encode = {
         "sub": thread_id,
@@ -41,7 +41,7 @@ def create_access_token(thread_id: str, expires_delta: Optional[timedelta] = Non
         "jti": sanitize_string(f"{thread_id}-{datetime.now(UTC).timestamp()}"),  # Add unique token identifier
     }
 
-    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.jwt.secret_key, algorithm=settings.jwt.algorithm)
 
     logger.info("token_created", thread_id=thread_id, expires_at=expire.isoformat())
 
@@ -71,7 +71,7 @@ def verify_token(token: str) -> Optional[str]:
         raise ValueError("Token format is invalid - expected JWT format")
 
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(token, settings.jwt.secret_key, algorithms=[settings.jwt.algorithm])
         thread_id: str | None = payload.get("sub")
         if thread_id is None:
             logger.warning("token_missing_thread_id")
@@ -80,6 +80,6 @@ def verify_token(token: str) -> Optional[str]:
         logger.info("token_verified", thread_id=thread_id)
         return thread_id
 
-    except JWTError as e:
-        logger.error("token_verification_failed", error=str(e))
+    except JWTError:
+        logger.exception("token_verification_failed")
         return None

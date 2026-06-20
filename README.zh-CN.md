@@ -127,7 +127,9 @@ llm = ChatOpenAI(
 ## 包含哪些能力
 
 - **LangGraph** 有状态 Agent，支持检查点、工具调用与 human-in-the-loop
-- **长期记忆**：mem0 + pgvector，按用户语义检索，带缓存兜底
+- **多数据库后端**：通过 `DB_DIALECT` 选择 PostgreSQL + pgvector（默认）或 MySQL 8+ + Weaviate
+- **Repository 模式**：配合 FastAPI 依赖注入，数据访问层更清爽、可测试
+- **长期记忆**：基于 mem0，PostgreSQL 用 pgvector，MySQL 用 Weaviate，按用户语义检索，带缓存兜底
 - **LLM 服务**：环形模型 fallback、指数退避重试、总超时预算
 - **Langfuse** 对所有 LLM 调用追踪；Prometheus 指标 + Grafana 仪表盘
 - **JWT 鉴权** 与会话管理；通过 slowapi 限流
@@ -155,7 +157,7 @@ make docker-up                     # 启动 API + PostgreSQL
 | [Architecture](docs/architecture.md) | 系统设计、请求流、组件图 |
 | [Configuration](docs/configuration.md) | 所有环境变量及默认值 |
 | [Authentication](docs/authentication.md) | JWT 流程、会话、端点参考 |
-| [Database & Migrations](docs/database.md) | Schema、Alembic 迁移、pgvector |
+| [Database & Migrations](docs/database.md) | Schema、Alembic 迁移、PostgreSQL/MySQL + pgvector/Weaviate |
 | [LLM Service](docs/llm-service.md) | 模型、重试、fallback、超时预算 |
 | [Memory](docs/memory.md) | mem0 长期记忆、缓存层 |
 | [Observability](docs/observability.md) | Langfuse、结构化日志、Prometheus、性能剖析 |
@@ -166,17 +168,20 @@ make docker-up                     # 启动 API + PostgreSQL
 
 ```
 src/agent/
-  api/v1/          # 路由处理器
+  api/v1/          # 路由处理器 + FastAPI 依赖注入
   core/
     langgraph/     # Agent 图 + 工具
     prompts/       # 系统提示词模板
+    config/        # 按域组织的 Pydantic 配置
+    db/            # 方言感知的数据库工厂（URL、checkpointer、向量存储）
     cache.py       # Valkey/Redis + 内存兜底
-    config.py      # 配置
     middleware.py  # 指标、日志上下文、性能剖析
     limiter.py     # 限流
   models/          # SQLModel ORM 模型
+  repositories/    # User/Session 仓库层
   schemas/         # Pydantic 请求/响应模型
   services/        # LLM、数据库、记忆服务
+  utils/           # 鉴权/图工具函数
 alembic/           # 数据库迁移
 evals/             # LLM 评测框架
 ```
@@ -199,7 +204,7 @@ evals/             # LLM 评测框架
 一个基于 FastAPI + LangGraph 的生产就绪 AI Agent 后端地基。它打包了那些你本来需要手工拼装的组件：有状态对话、长期记忆、工具调用、可观测性、限流和 JWT 鉴权。
 
 **它和基础的 LangGraph 搭建有何不同？**
-LangGraph 的基础快速上手到"Agent 能在本地跑起来"就停了。本模板在此之上增加了 Alembic 迁移、mem0 + pgvector 长期记忆、Langfuse 追踪、Prometheus + Grafana 仪表盘、JWT 会话、slowapi 限流、带每请求上下文的结构化日志，以及一个环形 fallback 的 LLM 服务——这些都是你本来要单独构建的生产级关注点。
+LangGraph 的基础快速上手到"Agent 能在本地跑起来"就停了。本模板在此之上增加了 Alembic 迁移、多数据库支持（PostgreSQL/MySQL）、mem0 长期记忆（pgvector 或 Weaviate）、Langfuse 追踪、Prometheus + Grafana 仪表盘、JWT 会话、slowapi 限流、带每请求上下文的结构化日志、Repository 模式与依赖注入，以及一个环形 fallback 的 LLM 服务——这些都是你本来要单独构建的生产级关注点。
 
 ### 搭建与配置
 
@@ -207,10 +212,13 @@ LangGraph 的基础快速上手到"Agent 能在本地跑起来"就停了。本�
 推荐但非必需。`make docker-up` 会同时启动 API + PostgreSQL。仅本地搭建见 [docs/getting-started.md](docs/getting-started.md)。
 
 **支持哪些 LLM 提供方？**
-目前：通过 `src/agent/services/llm/registry.py` 中的 `LLMRegistry` **仅支持 OpenAI**。通过 LangChain 的 `init_chat_model` 实现多提供方支持（Anthropic、Google、OpenRouter）已在规划中——见 [#51](https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template/issues/51)。通过 `.env.development` 中的 `DEFAULT_LLM_MODEL` 配置你的模型。
+任何提供 OpenAI 兼容对话接口的提供商都可以。`src/agent/services/llm/registry.py` 中的 `LLMRegistry` 基于 `langchain_openai.ChatOpenAI`，因此 Atlas Cloud、OpenAI 等端点开箱即用。在 `.env.development` 中配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY` 和 `DEFAULT_LLM_MODEL`。
+
+**可以用 MySQL 替代 PostgreSQL 吗？**
+可以。设置 `DB_DIALECT=mysql`，并以 `.env.mysql.example` 为起点。需要 MySQL 8+。安装额外驱动：`uv sync --extra mysql`，然后用 `COMPOSE_PROFILES=mysql make stack-up` 启动完整栈。此时 checkpointer 切换为 `AIOMySQLSaver`，长期记忆默认使用 Weaviate。详见 [docs/database.md](docs/database.md)。
 
 **如何配置长期记忆？**
-长期记忆是自托管的：mem0 在进程内运行，并通过 pgvector 持久化进你现有的 PostgreSQL——无需单独的 mem0 云账号或 API Key。你只需要一个可用的 `OPENAI_API_KEY`（用于事实抽取 + 向量化）以及启用 pgvector 扩展。详见 [docs/memory.md](docs/memory.md)。
+长期记忆是自托管的：mem0 在进程内运行。PostgreSQL 环境下使用同一数据库的 pgvector；MySQL 环境下使用独立 Weaviate 实例。设置 `VECTOR_STORE_PROVIDER`（或让 `DB_DIALECT` 自动推导）以及对应连接参数。你只需要一个可用的 `OPENAI_API_KEY`（用于事实抽取 + 向量化）。详见 [docs/memory.md](docs/memory.md)。
 
 ### 开发
 
@@ -226,12 +234,14 @@ LangGraph 的基础快速上手到"Agent 能在本地跑起来"就停了。本�
 ### 故障排查
 
 **API 无法启动**
-- 确保 PostgreSQL 正在运行（`make docker-up` 会随 API 一起拉起）
-- 确认 `.env.development` 存在——从 `.env.example` 复制并填入必需密钥
+- 确保数据库正在运行（`make docker-up` 默认拉起 PostgreSQL；MySQL + Weaviate 请用 `COMPOSE_PROFILES=mysql make stack-up`）
+- 确认 `.env.development` 存在——PostgreSQL 从 `.env.example` 复制，MySQL 从 `.env.mysql.example` 复制，并填入必需密钥
+- 设置 `DB_DIALECT=postgres` 或 `DB_DIALECT=mysql` 以匹配后端
 - 应用迁移：`make migrate`
 
 **记忆 / 语义检索返回空**
-- 确认 PostgreSQL 实例已启用 `pgvector` 扩展
+- PostgreSQL：确认已启用 `pgvector` 扩展
+- MySQL：确认 Weaviate 正在运行且 `WEAVIATE_CLUSTER_URL` 正确
 - 确认 `OPENAI_API_KEY` 有效（mem0 会调用 OpenAI 做事实抽取 + 向量化）
 - 检查 `.env.development` 中已设置 `LONG_TERM_MEMORY_MODEL` 与 `LONG_TERM_MEMORY_EMBEDDER_MODEL`
 

@@ -59,21 +59,21 @@ class LLMService:
 
         all_names = LLMRegistry.get_all_names()
         try:
-            self._current_model_index = all_names.index(settings.DEFAULT_LLM_MODEL)
-            self._llm = LLMRegistry.get(settings.DEFAULT_LLM_MODEL)
+            self._current_model_index = all_names.index(settings.llm.model)
+            self._llm = LLMRegistry.get(settings.llm.model)
             logger.info(
                 "llm_service_initialized",
-                default_model=settings.DEFAULT_LLM_MODEL,
+                default_model=settings.llm.model,
                 model_index=self._current_model_index,
                 total_models=len(all_names),
-                environment=settings.ENVIRONMENT.value,
+                environment=settings.app.environment.value,
             )
         except Exception as e:
             self._current_model_index = 0
             self._llm = LLMRegistry.LLMS[0]["llm"]
             logger.warning(
                 "default_model_not_found_using_first",
-                requested=settings.DEFAULT_LLM_MODEL,
+                requested=settings.llm.model,
                 using=all_names[0] if all_names else "none",
                 error=str(e),
             )
@@ -132,14 +132,14 @@ class LLMService:
         try:
             return await asyncio.wait_for(
                 self._call_with_fallback(messages, model_name, response_format, model_kwargs),
-                timeout=settings.LLM_TOTAL_TIMEOUT,
+                timeout=settings.llm.total_timeout,
             )
         except asyncio.TimeoutError:
             logger.exception(
                 "llm_total_timeout_exceeded",
-                timeout_seconds=settings.LLM_TOTAL_TIMEOUT,
+                timeout_seconds=settings.llm.total_timeout,
             )
-            raise RuntimeError(f"llm call timed out after {settings.LLM_TOTAL_TIMEOUT}s total budget")
+            raise RuntimeError(f"llm call timed out after {settings.llm.total_timeout}s total budget")
 
     def get_llm(self) -> Any:
         """Return the current tool-bound default LLM instance.
@@ -169,7 +169,7 @@ class LLMService:
     # ------------------------------------------------------------------
 
     @retry(
-        stop=stop_after_attempt(settings.MAX_LLM_CALL_RETRIES),
+        stop=stop_after_attempt(settings.llm.max_retries),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIError)),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -232,8 +232,8 @@ class LLMService:
                 self._llm = self._llm.bind_tools(self._bound_tools)
             logger.info("model_switched", new_model=next_entry["name"], new_index=next_index)
             return True
-        except Exception as e:
-            logger.error("model_switch_failed", error=str(e))
+        except Exception:
+            logger.exception("model_switch_failed")
             return False
 
     async def _call_with_fallback(

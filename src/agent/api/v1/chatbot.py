@@ -14,7 +14,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 
-from agent.api.v1.auth import get_current_session
+from agent.api.v1.dependencies import get_current_session
 from agent.core.config import settings
 from agent.core.langgraph.graph import LangGraphAgent
 from agent.core.limiter import limiter
@@ -33,7 +33,7 @@ agent = LangGraphAgent()
 
 
 @router.post("/chat", response_model=ChatResponse)
-@limiter.limit(settings.RATE_LIMIT_ENDPOINTS["chat"][0])
+@limiter.limit(settings.rate_limit.endpoints["chat"][0])
 async def chat(
     request: Request,
     chat_request: ChatRequest,
@@ -59,7 +59,7 @@ async def chat(
             message_count=len(chat_request.messages),
         )
 
-        if settings.SESSION_NAMING_ENABLED:
+        if settings.llm.session_naming_enabled:
             maybe_name_session(session.id, session.name, chat_request.messages)
 
         result = await agent.get_response(
@@ -75,7 +75,7 @@ async def chat(
 
 
 @router.post("/chat/stream")
-@limiter.limit(settings.RATE_LIMIT_ENDPOINTS["chat_stream"][0])
+@limiter.limit(settings.rate_limit.endpoints["chat_stream"][0])
 async def chat_stream(
     request: Request,
     chat_request: ChatRequest,
@@ -101,7 +101,7 @@ async def chat_stream(
             message_count=len(chat_request.messages),
         )
 
-        if settings.SESSION_NAMING_ENABLED:
+        if settings.llm.session_naming_enabled:
             maybe_name_session(session.id, session.name, chat_request.messages)
 
         async def event_generator():
@@ -146,7 +146,7 @@ async def chat_stream(
 
 
 @router.get("/messages", response_model=ChatResponse)
-@limiter.limit(settings.RATE_LIMIT_ENDPOINTS["messages"][0])
+@limiter.limit(settings.rate_limit.endpoints["messages"][0])
 async def get_session_messages(
     request: Request,
     session: Session = Depends(get_current_session),
@@ -172,7 +172,7 @@ async def get_session_messages(
 
 
 @router.delete("/messages")
-@limiter.limit(settings.RATE_LIMIT_ENDPOINTS["messages"][0])
+@limiter.limit(settings.rate_limit.endpoints["messages"][0])
 async def clear_chat_history(
     request: Request,
     session: Session = Depends(get_current_session),

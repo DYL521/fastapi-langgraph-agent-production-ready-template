@@ -104,7 +104,7 @@ class LoggingContextMiddleware(BaseHTTPMiddleware):
 
                 try:
                     # Decode token to get session_id (stored in "sub" claim)
-                    payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+                    payload = jwt.decode(token, settings.jwt.secret_key, algorithms=[settings.jwt.algorithm])
                     session_id = payload.get("sub")
 
                     if session_id:
@@ -164,13 +164,13 @@ class ProfilingMiddleware(BaseHTTPMiddleware):
 
         wall_ms = round((profiler.last_session.duration if profiler.last_session else 0.0) * 1000, 2)
 
-        if wall_ms / 1000 >= settings.PROFILING_THRESHOLD_SECONDS:
+        if wall_ms / 1000 >= settings.logging.profiling_threshold_seconds:
             raw_id = correlation_id.get() or "unknown"
             if len(raw_id) == 32 and "-" not in raw_id:
                 raw_id = f"{raw_id[:8]}-{raw_id[8:12]}-{raw_id[12:16]}-{raw_id[16:20]}-{raw_id[20:]}"
 
-            settings.PROFILING_DIR.mkdir(parents=True, exist_ok=True)
-            filepath = settings.PROFILING_DIR / f"{raw_id}.json"
+            settings.logging.profiling_dir.mkdir(parents=True, exist_ok=True)
+            filepath = settings.logging.profiling_dir / f"{raw_id}.json"
 
             # Top 20 memory allocators — exclude profiler and stdlib noise
             _excluded = ("tracemalloc", "pyinstrument", "<frozen", "logging/__init__")

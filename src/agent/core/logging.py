@@ -28,7 +28,7 @@ from agent.core.config import (
 )
 
 # Ensure log directory exists
-settings.LOG_DIR.mkdir(parents=True, exist_ok=True)
+settings.logging.dir.mkdir(parents=True, exist_ok=True)
 
 # Context variables for storing request-specific data
 _request_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar("request_context", default=None)
@@ -100,8 +100,8 @@ def get_log_file_path() -> Path:
     Returns:
         Path: The path to the log file
     """
-    env_prefix = settings.ENVIRONMENT.value
-    return settings.LOG_DIR / f"{env_prefix}-{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+    env_prefix = settings.app.environment.value
+    return settings.logging.dir / f"{env_prefix}-{datetime.now().strftime('%Y-%m-%d')}.jsonl"
 
 
 class JsonlFileHandler(logging.Handler):
@@ -128,7 +128,7 @@ class JsonlFileHandler(logging.Handler):
                 "function": record.funcName,
                 "filename": record.pathname,
                 "line": record.lineno,
-                "environment": settings.ENVIRONMENT.value,
+                "environment": settings.app.environment.value,
             }
             extra = getattr(record, "extra", None)
             if isinstance(extra, dict):
@@ -185,7 +185,7 @@ def get_structlog_processors(include_file_info: bool = True) -> List[Any]:
         )
 
     # Add environment info
-    processors.append(lambda _, __, event_dict: {**event_dict, "environment": settings.ENVIRONMENT.value})
+    processors.append(lambda _, __, event_dict: {**event_dict, "environment": settings.app.environment.value})
 
     return processors
 
@@ -197,7 +197,7 @@ def setup_logging() -> None:
     In staging/production: structured JSON logs
     """
     # Determine log level based on DEBUG setting
-    log_level = logging.DEBUG if settings.DEBUG else logging.INFO
+    log_level = logging.DEBUG if settings.app.debug else logging.INFO
 
     # Create file handler for JSON logs
     file_handler = JsonlFileHandler(get_log_file_path())
@@ -210,7 +210,7 @@ def setup_logging() -> None:
     # Get shared processors
     shared_processors = get_structlog_processors(
         # Include detailed file info only in development and test
-        include_file_info=settings.ENVIRONMENT in [Environment.DEVELOPMENT, Environment.TEST]
+        include_file_info=settings.app.environment in [Environment.DEVELOPMENT, Environment.TEST]
     )
 
     # Configure standard logging
@@ -221,7 +221,7 @@ def setup_logging() -> None:
     )
 
     # Configure structlog based on environment
-    if settings.LOG_FORMAT == "console":
+    if settings.logging.format == "console":
         # Development-friendly console logging
         structlog.configure(
             processors=[
@@ -251,11 +251,11 @@ setup_logging()
 
 # Create logger instance
 logger = structlog.get_logger()
-log_level_name = "DEBUG" if settings.DEBUG else "INFO"
+log_level_name = "DEBUG" if settings.app.debug else "INFO"
 logger.info(
     "logging_initialized",
-    environment=settings.ENVIRONMENT.value,
+    environment=settings.app.environment.value,
     log_level=log_level_name,
-    log_format=settings.LOG_FORMAT,
-    debug=settings.DEBUG,
+    log_format=settings.logging.format,
+    debug=settings.app.debug,
 )

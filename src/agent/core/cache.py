@@ -118,11 +118,11 @@ class ValkeyCacheService:
     async def initialize(self) -> None:
         """Connect to Redis/Valkey server."""
         client = Redis(
-            host=settings.VALKEY_HOST,
-            port=settings.VALKEY_PORT,
-            db=settings.VALKEY_DB,
-            password=settings.VALKEY_PASSWORD or None,
-            max_connections=settings.VALKEY_MAX_CONNECTIONS,
+            host=settings.cache.valkey_host,
+            port=settings.cache.valkey_port,
+            db=settings.cache.valkey_db,
+            password=settings.cache.valkey_password or None,
+            max_connections=settings.cache.valkey_max_connections,
             decode_responses=True,
         )
         await cast(Awaitable[bool], client.ping())
@@ -130,8 +130,8 @@ class ValkeyCacheService:
         logger.info(
             "cache_initialized",
             backend="redis",
-            host=settings.VALKEY_HOST,
-            port=settings.VALKEY_PORT,
+            host=settings.cache.valkey_host,
+            port=settings.cache.valkey_port,
             ttl=self._default_ttl,
         )
 
@@ -193,18 +193,18 @@ def _create_cache_service() -> InMemoryCacheService | ValkeyCacheService:
     Returns:
         A cache service instance (Redis if configured, otherwise in-memory).
     """
-    ttl = settings.CACHE_TTL_SECONDS
+    ttl = settings.cache.ttl_seconds
 
-    if settings.VALKEY_HOST and REDIS_AVAILABLE:
+    if settings.cache.valkey_host and REDIS_AVAILABLE:
         return ValkeyCacheService(default_ttl=ttl)
 
-    if settings.VALKEY_HOST and not REDIS_AVAILABLE:
+    if settings.cache.valkey_host and not REDIS_AVAILABLE:
         logger.warning(
             "redis_client_not_installed",
             hint="install with: uv add redis --optional cache",
         )
 
-    return InMemoryCacheService(default_ttl=ttl, max_size=settings.CACHE_MAX_ITEMS)
+    return InMemoryCacheService(default_ttl=ttl, max_size=settings.cache.max_items)
 
 
 def cache_key(prefix: str, *parts: str) -> str:

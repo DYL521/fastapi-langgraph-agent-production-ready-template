@@ -30,7 +30,7 @@ from agent.core.middleware import (
     ProfilingMiddleware,
 )
 from agent.core.observability import langfuse_init
-from agent.services.database import database_service
+from agent.services.database import database
 from agent.services.memory import memory_service
 
 # Load environment variables
@@ -43,9 +43,9 @@ async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     logger.info(
         "application_startup",
-        project_name=settings.PROJECT_NAME,
-        version=settings.VERSION,
-        api_prefix=settings.API_V1_STR,
+        project_name=settings.app.project_name,
+        version=settings.app.version,
+        api_prefix=settings.app.api_v1_str,
     )
 
     # Initialize cache service (connects to Valkey if configured)
@@ -80,10 +80,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title=settings.PROJECT_NAME,
-    version=settings.VERSION,
-    description=settings.DESCRIPTION,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    title=settings.app.project_name,
+    version=settings.app.version,
+    description=settings.app.description,
+    openapi_url=f"{settings.app.api_v1_str}/openapi.json",
     lifespan=lifespan,
 )
 
@@ -97,7 +97,7 @@ app.add_middleware(LoggingContextMiddleware)
 app.add_middleware(MetricsMiddleware)
 
 # Add profiling middleware (DEBUG only — saves HTML to /tmp on slow requests)
-if settings.DEBUG:
+if settings.app.debug:
     app.add_middleware(ProfilingMiddleware)
 
 # Add correlation ID middleware — must be outermost so request_id is set before all others
@@ -143,33 +143,33 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Set up CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=settings.app.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Include API router
-app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router, prefix=settings.app.api_v1_str)
 
 
 @app.get("/")
-@limiter.limit(settings.RATE_LIMIT_ENDPOINTS["root"][0])
+@limiter.limit(settings.rate_limit.endpoints["root"][0])
 async def root(request: Request):
     """Root endpoint returning basic API information."""
     logger.info("root_endpoint_called")
     return {
-        "name": settings.PROJECT_NAME,
-        "version": settings.VERSION,
+        "name": settings.app.project_name,
+        "version": settings.app.version,
         "status": "healthy",
-        "environment": settings.ENVIRONMENT.value,
+        "environment": settings.app.environment.value,
         "swagger_url": "/docs",
         "redoc_url": "/redoc",
     }
 
 
 @app.get("/health")
-@limiter.limit(settings.RATE_LIMIT_ENDPOINTS["health"][0])
+@limiter.limit(settings.rate_limit.endpoints["health"][0])
 async def health_check(request: Request) -> JSONResponse:
     """Health check endpoint with environment-specific information.
 
@@ -180,12 +180,12 @@ async def health_check(request: Request) -> JSONResponse:
     logger.info("health_check_called")
 
     # Check database connectivity
-    db_healthy = await database_service.health_check()
+    db_healthy = await database.health_check()
 
     response = {
         "status": "healthy" if db_healthy else "degraded",
-        "version": settings.VERSION,
-        "environment": settings.ENVIRONMENT.value,
+        "version": settings.app.version,
+        "environment": settings.app.environment.value,
         "components": {"api": "healthy", "database": "healthy" if db_healthy else "unhealthy"},
         "timestamp": datetime.now().isoformat(),
     }

@@ -21,6 +21,53 @@ services:
     networks:
       - monitoring
 
+  # MySQL — alternative relational DB. Opt-in: enable with `COMPOSE_PROFILES=mysql`
+  # (or `docker compose --profile mysql ...`) and set DB_DIALECT=mysql in your .env.
+  # Falls back to POSTGRES_* values so a single .env can drive either dialect.
+  mysql:
+    image: mysql:8.4
+    profiles: ["mysql"]
+    # utf8mb4 with MySQL 8's default collation (utf8mb4_0900_ai_ci) — matches the
+    # LangGraph checkpointer's DDL and the utf8mb4 app connections.
+    command: ["--character-set-server=utf8mb4"]
+    environment:
+      - MYSQL_DATABASE=${DB_NAME:-${POSTGRES_DB}}
+      - MYSQL_USER=${DB_USER:-${POSTGRES_USER}}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-${POSTGRES_PASSWORD}}
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD:-${DB_PASSWORD:-${POSTGRES_PASSWORD}}}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-${DB_PASSWORD:-${POSTGRES_PASSWORD}}}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - monitoring
+
+  # Weaviate — standalone vector store for long-term memory when DB_DIALECT=mysql
+  # (pgvector requires PostgreSQL). Opt-in via the `mysql` profile.
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.27.0
+    profiles: ["mysql"]
+    command: ["--host", "0.0.0.0", "--port", "8080", "--scheme", "http"]
+    environment:
+      - PERSISTENCE_DATA_PATH=/var/lib/weaviate
+      - DEFAULT_VECTORIZER_MODULE=none      # vectors come from mem0's OpenAI embedder
+      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
+      - QUERY_DEFAULTS_LIMIT=25
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+    restart: always
+    networks:
+      - monitoring
+
   # Valkey (Redis-compatible) cache — optional, set VALKEY_HOST=valkey in your .env to enable
   valkey:
     image: valkey/valkey:8.1.6-alpine
@@ -116,4 +163,6 @@ networks:
 volumes:
   grafana-storage:
   postgres-data:
+  mysql-data:
+  weaviate-data:
   valkey-data:

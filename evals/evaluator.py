@@ -45,14 +45,14 @@ class Evaluator:
 
     def __init__(self):
         """Initialize Evaluator with OpenAI and Langfuse clients."""
-        self.client = openai.AsyncOpenAI(api_key=settings.EVALUATION_API_KEY, base_url=settings.EVALUATION_BASE_URL)
+        self.client = openai.AsyncOpenAI(api_key=settings.evaluation.api_key, base_url=settings.evaluation.base_url)
         self.langfuse = Langfuse(
-            public_key=settings.LANGFUSE_PUBLIC_KEY,
-            secret_key=settings.LANGFUSE_SECRET_KEY,
+            public_key=settings.langfuse.public_key,
+            secret_key=settings.langfuse.secret_key,
             timeout=60,  # In seconds
         )
         # Initialize report data structure
-        self.report = initialize_report(settings.EVALUATION_LLM)
+        self.report = initialize_report(settings.evaluation.llm)
         initialize_metrics_summary(self.report, metrics)
 
     async def run(self, generate_report_file=True):
@@ -97,7 +97,7 @@ class Evaluator:
                 trace_results[trace_id]["metrics_evaluated"] += 1
 
             process_trace_results(self.report, trace_id, trace_results, len(metrics))
-            sleep(settings.EVALUATION_SLEEP_TIME)
+            sleep(settings.evaluation.sleep_time)
 
         self.report["duration_seconds"] = round(time.time() - start_time, 2)
         calculate_avg_scores(self.report)
@@ -181,7 +181,7 @@ class Evaluator:
         for _ in range(num_retries):
             try:
                 response = await self.client.beta.chat.completions.parse(
-                    model=settings.EVALUATION_LLM,
+                    model=settings.evaluation.llm,
                     messages=[
                         {"role": "system", "content": metric_system_prompt},
                         {"role": "user", "content": f"Input: {input}\nGeneration: {output}"},

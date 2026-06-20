@@ -16,14 +16,14 @@ from agent.core.logging import logger
 
 # Build storage URI for Valkey if configured
 _storage_uri = None
-if settings.VALKEY_HOST:
-    _password_part = f":{settings.VALKEY_PASSWORD}@" if settings.VALKEY_PASSWORD else ""
-    _storage_uri = f"redis://{_password_part}{settings.VALKEY_HOST}:{settings.VALKEY_PORT}/{settings.VALKEY_DB}"
-    logger.info("rate_limiter_using_valkey", host=settings.VALKEY_HOST, port=settings.VALKEY_PORT)
+if settings.cache.valkey_host:
+    _password_part = f":{settings.cache.valkey_password}@" if settings.cache.valkey_password else ""
+    _storage_uri = f"redis://{_password_part}{settings.cache.valkey_host}:{settings.cache.valkey_port}/{settings.cache.valkey_db}"
+    logger.info("rate_limiter_using_valkey", host=settings.cache.valkey_host, port=settings.cache.valkey_port)
 
 # Initialize rate limiter (uses in-memory storage if no Valkey)
 limiter = Limiter(
     key_func=get_remote_address,
-    default_limits=settings.RATE_LIMIT_DEFAULT,  # pyright: ignore[reportArgumentType]
+    default_limits=settings.rate_limit.default,  # pyright: ignore[reportArgumentType]
     storage_uri=_storage_uri,
 )

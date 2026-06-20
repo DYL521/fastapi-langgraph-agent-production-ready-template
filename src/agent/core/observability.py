@@ -9,17 +9,17 @@ from agent.core.logging import logger
 
 def langfuse_init():
     """Initialize Langfuse."""
-    if not settings.LANGFUSE_TRACING_ENABLED:
+    if not settings.langfuse.tracing_enabled:
         logger.debug("langfuse_tracing_disabled")
         return
 
     langfuse = Langfuse(
-        tracing_enabled=settings.LANGFUSE_TRACING_ENABLED,
-        public_key=settings.LANGFUSE_PUBLIC_KEY,
-        secret_key=settings.LANGFUSE_SECRET_KEY,
-        host=settings.LANGFUSE_HOST,
-        environment=settings.ENVIRONMENT.value,
-        debug=settings.DEBUG,
+        tracing_enabled=settings.langfuse.tracing_enabled,
+        public_key=settings.langfuse.public_key,
+        secret_key=settings.langfuse.secret_key,
+        host=settings.langfuse.host,
+        environment=settings.app.environment.value,
+        debug=settings.app.debug,
     )
 
     try:

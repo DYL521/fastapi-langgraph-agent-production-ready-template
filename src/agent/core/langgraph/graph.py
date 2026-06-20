@@ -2,11 +2,11 @@
 
 import asyncio
 from typing import (
+    Any,
     AsyncGenerator,
     Optional,
     cast,
 )
-from urllib.parse import quote_plus
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import (
@@ -16,7 +16,6 @@ from langchain_core.messages import (
     ToolMessage,
     convert_to_openai_messages,
 )
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.errors import GraphInterrupt
 from langgraph.graph import (
     END,
@@ -31,19 +30,15 @@ from langgraph.types import (
     RetryPolicy,
     StateSnapshot,
 )
-from psycopg import (
-    AsyncConnection,
-    sql,
-)
-from psycopg.rows import (
-    DictRow,
-    dict_row,
-)
-from psycopg_pool import AsyncConnectionPool
 
 from agent.core.config import (
     Environment,
     settings,
+)
+from agent.core.db import (
+    create_checkpointer,
+    create_checkpointer_pool,
+    delete_thread_checkpoints,
 )
 from agent.core.langgraph.tools import tools
 from agent.core.logging import logger
@@ -64,9 +59,6 @@ from agent.utils import (
     spawn_background_task,
 )
 
-PostgresConnPool = AsyncConnectionPool[AsyncConnection[DictRow]]
-
-
 class LangGraphAgent:
     """Manages the LangGraph Agent/workflow and interactions with the LLM.
 
@@ -80,50 +72,37 @@ class LangGraphAgent:
         self.llm_service = llm_service
         self.llm_service.bind_tools(tools)
         self.tools_by_name = {tool.name: tool for tool in tools}
-        self._connection_pool: Optional[PostgresConnPool] = None
+        # Pool type depends on the active DB dialect (psycopg or aiomysql), so Any.
+        self._connection_pool: Optional[Any] = None
         self._graph: Optional[CompiledStateGraph] = None
         logger.info(
             "langgraph_agent_initialized",
-            model=settings.DEFAULT_LLM_MODEL,
-            environment=settings.ENVIRONMENT.value,
+            model=settings.llm.model,
+            environment=settings.app.environment.value,
         )
 
-    async def _get_connection_pool(self) -> Optional[PostgresConnPool]:
-        """Get a PostgreSQL connection pool using environment-specific settings.
+    async def _get_connection_pool(self) -> Optional[Any]:
+        """Get the checkpointer connection pool for the configured DB dialect.
 
         Returns:
-            AsyncConnectionPool or None when the pool fails to initialise in
-            production (the app keeps running in a degraded mode).
+            An open connection pool (psycopg or aiomysql), or None when the pool
+            fails to initialise in production (the app keeps running in a
+            degraded mode).
         """
         if self._connection_pool is None:
             try:
-                # Configure pool size based on environment
-                max_size = settings.POSTGRES_POOL_SIZE
-
-                connection_url = (
-                    "postgresql://"
-                    f"{quote_plus(settings.POSTGRES_USER)}:{quote_plus(settings.POSTGRES_PASSWORD)}"
-                    f"@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+                self._connection_pool = await create_checkpointer_pool()
+                logger.info(
+                    "connection_pool_created",
+                    max_size=settings.database.pool_size,
+                    dialect=settings.database.dialect,
+                    environment=settings.app.environment.value,
                 )
-
-                self._connection_pool = AsyncConnectionPool(
-                    connection_url,
-                    open=False,
-                    max_size=max_size,
-                    kwargs={
-                        "autocommit": True,
-                        "connect_timeout": 5,
-                        "prepare_threshold": None,
-                        "row_factory": dict_row,
-                    },
-                )
-                await self._connection_pool.open()
-                logger.info("connection_pool_created", max_size=max_size, environment=settings.ENVIRONMENT.value)
             except Exception as e:
-                logger.error("connection_pool_creation_failed", error=str(e), environment=settings.ENVIRONMENT.value)
+                logger.exception("connection_pool_creation_failed", environment=settings.app.environment.value)
                 # In production, we might want to degrade gracefully
-                if settings.ENVIRONMENT == Environment.PRODUCTION:
-                    logger.warning("continuing_without_connection_pool", environment=settings.ENVIRONMENT.value)
+                if settings.app.environment == Environment.PRODUCTION:
+                    logger.warning("continuing_without_connection_pool", environment=settings.app.environment.value)
                     return None
                 raise e
         return self._connection_pool
@@ -143,7 +122,7 @@ class LangGraphAgent:
         model_name = (
             current_llm.model_name
             if current_llm and hasattr(current_llm, "model_name")
-            else settings.DEFAULT_LLM_MODEL
+            else settings.llm.model
         )
 
         username = config.get("metadata", {}).get("username")
@@ -165,7 +144,7 @@ class LangGraphAgent:
                 "llm_response_generated",
                 session_id=thread_id,
                 model=model_name,
-                environment=settings.ENVIRONMENT.value,
+                environment=settings.app.environment.value,
             )
 
             # Determine next node based on whether there are tool calls
@@ -176,11 +155,10 @@ class LangGraphAgent:
 
             return Command(update={"messages": [response_message]}, goto=goto)
         except Exception as e:
-            logger.error(
+            logger.exception(
                 "llm_call_failed_all_models",
                 session_id=thread_id,
-                error=str(e),
-                environment=settings.ENVIRONMENT.value,
+                environment=settings.app.environment.value,
             )
             raise Exception(f"failed to get llm response after trying all models: {str(e)}")
 
@@ -234,28 +212,28 @@ class LangGraphAgent:
                 # Get connection pool (may be None in production if DB unavailable)
                 connection_pool = await self._get_connection_pool()
                 if connection_pool:
-                    checkpointer = AsyncPostgresSaver(connection_pool)
+                    checkpointer = create_checkpointer(connection_pool)
                     await checkpointer.setup()
                 else:
                     # In production, proceed without checkpointer if needed
                     checkpointer = None
-                    if settings.ENVIRONMENT != Environment.PRODUCTION:
+                    if settings.app.environment != Environment.PRODUCTION:
                         raise Exception("Connection pool initialization failed")
 
                 self._graph = graph_builder.compile(
-                    checkpointer=checkpointer, name=f"{settings.PROJECT_NAME} Agent ({settings.ENVIRONMENT.value})"
+                    checkpointer=checkpointer, name=f"{settings.app.project_name} Agent ({settings.app.environment.value})"
                 )
 
                 logger.info(
                     "graph_created",
-                    graph_name=f"{settings.PROJECT_NAME} Agent",
-                    environment=settings.ENVIRONMENT.value,
+                    graph_name=f"{settings.app.project_name} Agent",
+                    environment=settings.app.environment.value,
                     has_checkpointer=checkpointer is not None,
                 )
             except Exception as e:
-                logger.error("graph_creation_failed", error=str(e), environment=settings.ENVIRONMENT.value)
+                logger.exception("graph_creation_failed", environment=settings.app.environment.value)
                 # In production, we don't want to crash the app
-                if settings.ENVIRONMENT == Environment.PRODUCTION:
+                if settings.app.environment == Environment.PRODUCTION:
                     logger.warning("continuing_without_graph")
                     return None
                 raise e
@@ -295,7 +273,7 @@ class LangGraphAgent:
             list[Message]: The response from the LLM.
         """
         graph = await self._get_graph()
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.LANGFUSE_TRACING_ENABLED else []
+        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.langfuse.tracing_enabled else []
         config: RunnableConfig = {
             "configurable": {"thread_id": session_id},
             "callbacks": callbacks,
@@ -303,8 +281,8 @@ class LangGraphAgent:
                 "user_id": user_id,
                 "username": username,
                 "session_id": session_id,
-                "environment": settings.ENVIRONMENT.value,
-                "debug": settings.DEBUG,
+                "environment": settings.app.environment.value,
+                "debug": settings.app.debug,
             },
         }
 
@@ -365,7 +343,7 @@ class LangGraphAgent:
         Yields:
             str: Tokens of the LLM response.
         """
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.LANGFUSE_TRACING_ENABLED else []
+        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.langfuse.tracing_enabled else []
         config: RunnableConfig = {
             "configurable": {"thread_id": session_id},
             "callbacks": callbacks,
@@ -373,8 +351,8 @@ class LangGraphAgent:
                 "user_id": user_id,
                 "username": username,
                 "session_id": session_id,
-                "environment": settings.ENVIRONMENT.value,
-                "debug": settings.DEBUG,
+                "environment": settings.app.environment.value,
+                "debug": settings.app.debug,
             },
         }
         graph = await self._get_graph()
@@ -462,24 +440,17 @@ class LangGraphAgent:
             if conn_pool is None:
                 raise RuntimeError("connection pool unavailable; cannot clear chat history")
 
-            # Batch all DELETEs in a single pipeline round-trip
-            async with conn_pool.connection() as conn:
-                async with conn.pipeline():
-                    for table in settings.CHECKPOINT_TABLES:
-                        await conn.execute(
-                            sql.SQL("DELETE FROM {} WHERE thread_id = %s").format(sql.Identifier(table)),
-                            (session_id,),
-                        )
-                logger.info(
-                    "checkpoint_tables_cleared_for_session",
-                    tables=settings.CHECKPOINT_TABLES,
-                    session_id=session_id,
-                )
+            # Dialect-aware deletion across the checkpoint tables
+            await delete_thread_checkpoints(conn_pool, session_id)
+            logger.info(
+                "checkpoint_tables_cleared_for_session",
+                tables=settings.database.checkpoint_tables,
+                session_id=session_id,
+            )
 
-        except Exception as e:
-            logger.error(
+        except Exception:
+            logger.exception(
                 "clear_chat_history_operation_failed",
                 session_id=session_id,
-                error=str(e),
             )
             raise

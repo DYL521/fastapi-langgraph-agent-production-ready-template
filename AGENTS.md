@@ -50,7 +50,7 @@ This is a production-ready AI agent application built with:
 - **LangGraph** for stateful, multi-step AI agent workflows
 - **FastAPI** for high-performance async REST API endpoints
 - **Langfuse** for LLM observability and tracing
-- **PostgreSQL + pgvector** for long-term memory storage (mem0ai)
+- **PostgreSQL + pgvector** for long-term memory storage (mem0ai) — or **MySQL 8+ with Weaviate** via `DB_DIALECT` (see `docs/database.md`)
 - **JWT authentication** with session management
 - **Prometheus + Grafana** for monitoring
 
@@ -133,6 +133,7 @@ This is a production-ready AI agent application built with:
 - Define models in `src/agent/models/` directory
 - Use async database operations with asyncpg
 - Use LangGraph's AsyncPostgresSaver for agent checkpointing
+- **Multi-dialect**: the relational backend is selectable via `DB_DIALECT` (`postgres` | `mysql`). Never hardcode a `postgresql://` URL or import a DB driver directly — go through the factory layer in `src/agent/core/db/` (`build_sqlalchemy_url`, `create_checkpointer`, `get_vector_store_config`). MySQL uses `AIOMySQLSaver` + Weaviate; see `docs/database.md`.
 
 ## Performance Guidelines
 

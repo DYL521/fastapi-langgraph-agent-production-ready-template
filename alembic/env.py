@@ -10,7 +10,7 @@ from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
 from alembic import context
-from agent.core.config import settings
+from agent.core.db import build_sqlalchemy_url
 from agent.models.session import Session  # noqa: F401
 from agent.models.thread import Thread  # noqa: F401
 from agent.models.user import User  # noqa: F401
@@ -22,12 +22,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Build the database URL from app settings
-DATABASE_URL = (
-    f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}"
-    f"@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
-)
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+# Build the dialect-appropriate (sync) database URL from app settings
+config.set_main_option("sqlalchemy.url", build_sqlalchemy_url(async_=False))
 
 # Point Alembic at our SQLModel metadata for autogenerate support
 target_metadata = SQLModel.metadata
