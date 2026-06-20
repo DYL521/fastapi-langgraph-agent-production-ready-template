@@ -42,6 +42,13 @@ dependencies = [
     "alembic>=1.18.4",
 ]
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent"]
+
 [project.optional-dependencies]
 dev = [
     "black",
@@ -124,7 +131,7 @@ convention = "google"
 "__init__.py" = ["E402"]
 
 [tool.pyright]
-include = ["app", "evals"]
+include = ["src", "evals"]
 exclude = [
     "**/__pycache__",
     "**/.venv",

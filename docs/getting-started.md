@@ -87,9 +87,9 @@ The parts you'll most likely change:
 
 | What | Where |
 |---|---|
-| Agent personality & instructions | `app/core/prompts/system.md` |
-| Available tools | `app/core/langgraph/tools.py` |
-| LLM models & fallback order | `app/services/llm.py` → `LLMRegistry.LLMS` |
+| Agent personality & instructions | `src/agent/core/prompts/system.md` |
+| Available tools | `src/agent/core/langgraph/tools.py` |
+| LLM models & fallback order | `src/agent/services/llm.py` → `LLMRegistry.LLMS` |
 | Memory collection name | `LONG_TERM_MEMORY_COLLECTION_NAME` in `.env` |
 
 ## Running pre-commit hooks

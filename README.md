@@ -1,5 +1,7 @@
 # FastAPI LangGraph Agent Template
 
+**English** | [简体中文](README.zh-CN.md)
+
 A production-ready template for building AI agent backends with FastAPI and LangGraph. Handles the hard parts — stateful conversations, long-term memory, tool calling, observability, rate limiting, auth — so you can focus on your agent logic.
 
 **Built for AI engineers** who want a solid foundation, not a tutorial project.
@@ -163,7 +165,7 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs) to see the interac
 ## Project structure
 
 ```
-app/
+src/agent/
   api/v1/          # Route handlers
   core/
     langgraph/     # Agent graph + tools
@@ -205,7 +207,7 @@ The base LangGraph quickstart stops at "agent runs locally". This template adds 
 Recommended but not required. `make docker-up` starts the API + PostgreSQL together. For local-only setup see [docs/getting-started.md](docs/getting-started.md).
 
 **Which LLM providers are supported?**
-Today: **OpenAI only** via the `LLMRegistry` in `app/services/llm/registry.py`. Multi-provider support (Anthropic, Google, OpenRouter) via LangChain's `init_chat_model` is planned — see [#51](https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template/issues/51). Configure your model via `DEFAULT_LLM_MODEL` in `.env.development`.
+Today: **OpenAI only** via the `LLMRegistry` in `src/agent/services/llm/registry.py`. Multi-provider support (Anthropic, Google, OpenRouter) via LangChain's `init_chat_model` is planned — see [#51](https://github.com/wassim249/fastapi-langgraph-agent-production-ready-template/issues/51). Configure your model via `DEFAULT_LLM_MODEL` in `.env.development`.
 
 **How do I configure long-term memory?**
 Long-term memory is self-hosted: mem0 runs in-process and persists into your existing PostgreSQL via pgvector — there is no separate mem0 cloud account or API key. You only need a working `OPENAI_API_KEY` (used for fact extraction + embeddings) and the pgvector extension enabled. See [docs/memory.md](docs/memory.md) for details.
@@ -213,7 +215,7 @@ Long-term memory is self-hosted: mem0 runs in-process and persists into your exi
 ### Development
 
 **How do I add a custom tool?**
-Drop a LangChain `@tool`-decorated function in `app/core/langgraph/tools/` and register it in the `tools` list exported from that package. The agent picks it up on next start; no graph changes needed.
+Drop a LangChain `@tool`-decorated function in `src/agent/core/langgraph/tools/` and register it in the `tools` list exported from that package. The agent picks it up on next start; no graph changes needed.
 
 **How does the LLM service handle failures?**
 Two layers: (1) per-call exponential-backoff retry via `tenacity`, (2) **circular fallback** — if the active model exhausts its retries, the service rotates to the next model in `LLMRegistry` and continues. A total timeout budget caps the whole call so latency stays bounded. See [docs/llm-service.md](docs/llm-service.md).
@@ -234,4 +236,4 @@ Yes. Set `LANGFUSE_TRACING_ENABLED=false` (or omit the Langfuse keys). The agent
 - Check `LONG_TERM_MEMORY_MODEL` and `LONG_TERM_MEMORY_EMBEDDER_MODEL` are set in `.env.development`
 
 **Rate limiting is too aggressive**
-Limits are defined in `app/core/limiter.py` (slowapi). Adjust per-route decorators or the default rate in that file. See [docs/configuration.md](docs/configuration.md) for the related env vars.
+Limits are defined in `src/agent/core/limiter.py` (slowapi). Adjust per-route decorators or the default rate in that file. See [docs/configuration.md](docs/configuration.md) for the related env vars.

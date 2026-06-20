@@ -10,10 +10,10 @@ from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
 from alembic import context
-from app.core.config import settings
-from app.models.session import Session  # noqa: F401
-from app.models.thread import Thread  # noqa: F401
-from app.models.user import User  # noqa: F401
+from agent.core.config import settings
+from agent.models.session import Session  # noqa: F401
+from agent.models.thread import Thread  # noqa: F401
+from agent.models.user import User  # noqa: F401
 
 # Alembic Config object
 config = context.config
