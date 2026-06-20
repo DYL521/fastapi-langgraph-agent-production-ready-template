@@ -62,6 +62,12 @@ cache = [
     "redis>=7.4.0",
     "valkey[libvalkey]>=6.1.0",
 ]
+mysql = [
+    "asyncmy>=0.2.9",                              # async MySQL driver (SQLAlchemy + aiomysql pool)
+    "pymysql>=1.1.0",                              # sync MySQL driver (alembic / db tooling)
+    "langgraph-checkpoint-mysql[aiomysql]>=1.0.2", # LangGraph MySQL checkpointer (AIOMySQLSaver)
+    "weaviate-client>=4.9.0",                      # mem0 weaviate vector store provider
+]
 
 [dependency-groups]
 dev = [
@@ -129,6 +135,8 @@ convention = "google"
 # Ignore `E402` (import violations) in all `__init__.py` files
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["E402"]
+# Tests don't need full docstring coverage
+"tests/**" = ["D"]
 
 [tool.pyright]
 include = ["src", "evals"]
