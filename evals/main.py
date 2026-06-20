@@ -26,8 +26,8 @@ from evals.evaluator import Evaluator
 # Default configuration
 DEFAULT_CONFIG = {
     "generate_report": True,
-    "model": settings.EVALUATION_LLM,
-    "api_base": settings.EVALUATION_BASE_URL,
+    "model": settings.evaluation.llm,
+    "api_base": settings.evaluation.base_url,
 }
 
 
@@ -168,7 +168,7 @@ async def run_evaluation(generate_report: bool = True) -> None:
         generate_report: Whether to generate a JSON report
     """
     print_title("Starting Evaluation")
-    print_info(f"Using model: {settings.EVALUATION_LLM}")
+    print_info(f"Using model: {settings.evaluation.llm}")
     print_info(f"Report generation: {'Enabled' if generate_report else 'Disabled'}")
 
     try:
