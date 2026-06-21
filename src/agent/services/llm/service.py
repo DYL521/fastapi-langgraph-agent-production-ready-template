@@ -15,16 +15,10 @@ from typing import (
 
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import BaseMessage
-from openai import (
-    APIError,
-    APITimeoutError,
-    OpenAIError,
-    RateLimitError,
-)
 from pydantic import BaseModel
 from tenacity import (
+    AsyncRetrying,
     before_sleep_log,
-    retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -32,6 +26,10 @@ from tenacity import (
 
 from agent.core.config import settings
 from agent.core.logging import logger
+from agent.services.llm.providers import (
+    build_chat_model,
+    get_active_provider,
+)
 from agent.services.llm.registry import LLMRegistry
 
 T = TypeVar("T", bound=BaseModel)
@@ -168,15 +166,12 @@ class LLMService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @retry(
-        stop=stop_after_attempt(settings.llm.max_retries),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIError)),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
-        reraise=True,
-    )
     async def _invoke_with_retry(self, llm: Any, messages: LanguageModelInput) -> Any:
         """Invoke an LLM runnable with automatic per-model retry logic.
+
+        Retries on the active provider's transient error types (declared by its
+        adapter), with exponential backoff. Non-retryable errors propagate
+        immediately for the fallback loop to handle.
 
         Args:
             llm: Any LangChain ``Runnable`` (plain model or structured-output chain).
@@ -186,27 +181,18 @@ class LLMService:
             The runnable's response (``BaseMessage`` or a ``BaseModel`` instance).
 
         Raises:
-            OpenAIError: Propagated after all retry attempts are exhausted.
+            Exception: The provider error, propagated after retries are exhausted.
         """
-        try:
-            response = await llm.ainvoke(messages)
-            logger.debug("llm_call_successful")
-            return response
-        except (RateLimitError, APITimeoutError, APIError) as e:
-            logger.warning(
-                "llm_call_failed_retrying",
-                error_type=type(e).__name__,
-                error=str(e),
-                exc_info=True,
-            )
-            raise
-        except OpenAIError as e:
-            logger.error(
-                "llm_call_failed",
-                error_type=type(e).__name__,
-                error=str(e),
-            )
-            raise
+        retryer = AsyncRetrying(
+            stop=stop_after_attempt(settings.llm.max_retries),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type(get_active_provider().retryable_errors),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=True,
+        )
+        response = await retryer(llm.ainvoke, messages)
+        logger.debug("llm_call_successful")
+        return response
 
     def _switch_to_next_model(self) -> bool:
         """Advance the default model to the next entry in the registry (circular).
@@ -267,10 +253,14 @@ class LLMService:
         if model_name or response_format or model_kwargs:
             all_names = LLMRegistry.get_all_names()
             if model_name and model_name not in all_names:
-                logger.error("requested_model_not_found", model_name=model_name)
-                raise ValueError(
-                    f"model '{model_name}' not found in registry. available models: {', '.join(all_names)}"
-                )
+                # Out-of-chain model (e.g. a dedicated session-naming model):
+                # build it directly and run a single attempt with retry, no
+                # cross-model fallback.
+                logger.debug("building_out_of_chain_model", model_name=model_name)
+                target = build_chat_model(model_name, **model_kwargs)
+                if response_format:
+                    target = target.with_structured_output(response_format)
+                return await self._invoke_with_retry(target, messages)
 
             start = all_names.index(model_name) if model_name else self._current_model_index
             total = len(LLMRegistry.LLMS)
@@ -308,16 +298,19 @@ class LLMService:
         Raises:
             RuntimeError: When all models have been exhausted.
         """
+        # Treat the active provider's declared fatal errors as fall-back triggers;
+        # if a provider declares none, any Exception triggers fallback.
+        fatal_errors = get_active_provider().fatal_errors or (Exception,)
         total = len(LLMRegistry.LLMS)
         current = start
         models_tried = 0
-        last_error: Optional[Exception] = None
+        last_error: Optional[BaseException] = None
 
         for models_tried in range(1, total + 1):
             current_name = LLMRegistry.LLMS[current]["name"]
             try:
                 return await self._invoke_with_retry(get_target(current), messages)
-            except OpenAIError as e:
+            except fatal_errors as e:
                 last_error = e
                 logger.error(
                     "llm_call_failed_after_retries",
