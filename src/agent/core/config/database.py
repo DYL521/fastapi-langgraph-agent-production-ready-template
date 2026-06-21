@@ -9,6 +9,7 @@ from typing import Optional
 from pydantic import (
     AliasChoices,
     Field,
+    SecretStr,
     field_validator,
     model_validator,
 )
@@ -27,7 +28,9 @@ class DatabaseSettings(BaseSettings):
     port: Optional[int] = Field(default=None, validation_alias=AliasChoices("DB_PORT", "POSTGRES_PORT"))
     name: str = Field(default="food_order_db", validation_alias=AliasChoices("DB_NAME", "POSTGRES_DB"))
     user: str = Field(default="postgres", validation_alias=AliasChoices("DB_USER", "POSTGRES_USER"))
-    password: str = Field(default="postgres", validation_alias=AliasChoices("DB_PASSWORD", "POSTGRES_PASSWORD"))
+    password: SecretStr = Field(
+        default=SecretStr("postgres"), validation_alias=AliasChoices("DB_PASSWORD", "POSTGRES_PASSWORD")
+    )
     pool_size: int = Field(default=20, validation_alias=AliasChoices("DB_POOL_SIZE", "POSTGRES_POOL_SIZE"))
     max_overflow: int = Field(default=10, validation_alias=AliasChoices("DB_MAX_OVERFLOW", "POSTGRES_MAX_OVERFLOW"))
     checkpoint_tables: list[str] = Field(
@@ -56,7 +59,7 @@ class VectorStoreSettings(BaseSettings):
 
     provider: str = Field(default="", validation_alias="VECTOR_STORE_PROVIDER")
     weaviate_cluster_url: str = Field(default="http://localhost:8080", validation_alias="WEAVIATE_CLUSTER_URL")
-    weaviate_api_key: str = Field(default="", validation_alias="WEAVIATE_API_KEY")
+    weaviate_api_key: SecretStr = Field(default=SecretStr(""), validation_alias="WEAVIATE_API_KEY")
 
     @field_validator("provider", mode="before")
     @classmethod

@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import (
+    Field,
+    SecretStr,
+)
 from pydantic_settings import BaseSettings
 
 from agent.core.config._base import settings_config
@@ -15,7 +18,7 @@ class LangfuseSettings(BaseSettings):
 
     tracing_enabled: bool = Field(default=True)
     public_key: str = Field(default="")
-    secret_key: str = Field(default="")
+    secret_key: SecretStr = Field(default=SecretStr(""))
     host: str = Field(default="https://cloud.langfuse.com")
 
 

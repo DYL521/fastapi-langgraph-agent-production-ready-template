@@ -83,7 +83,7 @@ class Settings(BaseModel):
             self.vector.provider = "weaviate" if self.database.dialect == "mysql" else "pgvector"
 
         # Evaluation API key falls back to the main LLM key when unset.
-        if "api_key" not in self.evaluation.model_fields_set or not self.evaluation.api_key:
+        if "api_key" not in self.evaluation.model_fields_set or not self.evaluation.api_key.get_secret_value():
             self.evaluation.api_key = self.llm.api_key
 
         # Apply environment-specific defaults only where not explicitly set.
