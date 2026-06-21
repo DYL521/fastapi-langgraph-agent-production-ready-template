@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from pydantic import SecretStr
 
 from agent.core.config import settings
 from agent.core.db import (
@@ -32,11 +33,11 @@ def set_attrs(monkeypatch):
         ("postgres", False, "postgresql+psycopg2://"),
         ("postgres", True, "postgresql+psycopg://"),
         ("mysql", False, "mysql+pymysql://"),
-        ("mysql", True, "mysql+asyncmy://"),
+        ("mysql", True, "mysql+aiomysql://"),
     ],
 )
 def test_build_url_driver_prefix(set_attrs, dialect, async_, expected_prefix):
-    set_attrs(settings.database, dialect=dialect, user="u", password="p", host="h", port=1234, name="d")
+    set_attrs(settings.database, dialect=dialect, user="u", password=SecretStr("p"), host="h", port=1234, name="d")
     expected = f"{expected_prefix}u:p@h:1234/d"
     if dialect == "mysql":
         expected += "?charset=utf8mb4"  # MySQL connections must use utf8mb4
@@ -44,7 +45,15 @@ def test_build_url_driver_prefix(set_attrs, dialect, async_, expected_prefix):
 
 
 def test_build_url_escapes_credentials(set_attrs):
-    set_attrs(settings.database, dialect="postgres", user="user@x", password="p@ss:w/rd", host="h", port=5432, name="d")
+    set_attrs(
+        settings.database,
+        dialect="postgres",
+        user="user@x",
+        password=SecretStr("p@ss:w/rd"),
+        host="h",
+        port=5432,
+        name="d",
+    )
     url = build_sqlalchemy_url(async_=False)
     assert "user%40x" in url
     assert "p%40ss%3Aw%2Frd" in url
@@ -61,7 +70,7 @@ def test_build_url_unsupported_dialect(set_attrs):
 
 def test_vector_pgvector(set_attrs):
     set_attrs(settings.vector, provider="pgvector")
-    set_attrs(settings.database, name="d", user="u", password="p", host="h", port=5432)
+    set_attrs(settings.database, name="d", user="u", password=SecretStr("p"), host="h", port=5432)
     set_attrs(settings.memory, collection_name="mem")
     cfg = get_vector_store_config()
     assert cfg["provider"] == "pgvector"
@@ -72,7 +81,9 @@ def test_vector_pgvector(set_attrs):
 
 
 def test_vector_weaviate_anonymous(set_attrs):
-    set_attrs(settings.vector, provider="weaviate", weaviate_cluster_url="http://w:8080", weaviate_api_key="")
+    set_attrs(
+        settings.vector, provider="weaviate", weaviate_cluster_url="http://w:8080", weaviate_api_key=SecretStr("")
+    )
     set_attrs(settings.memory, collection_name="Mem")
     cfg = get_vector_store_config()
     assert cfg["provider"] == "weaviate"
@@ -81,7 +92,12 @@ def test_vector_weaviate_anonymous(set_attrs):
 
 
 def test_vector_weaviate_with_key(set_attrs):
-    set_attrs(settings.vector, provider="weaviate", weaviate_cluster_url="http://w:8080", weaviate_api_key="secret")
+    set_attrs(
+        settings.vector,
+        provider="weaviate",
+        weaviate_cluster_url="http://w:8080",
+        weaviate_api_key=SecretStr("secret"),
+    )
     set_attrs(settings.memory, collection_name="Mem")
     assert get_vector_store_config()["config"]["auth_client_secret"] == "secret"
 
