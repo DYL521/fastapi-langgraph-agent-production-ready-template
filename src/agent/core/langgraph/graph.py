@@ -401,11 +401,14 @@ class LangGraphAgent:
             logger.exception("stream_processing_failed", error=str(stream_error), session_id=session_id)
             raise stream_error
 
-    async def get_chat_history(self, session_id: str) -> list[Message]:
+    async def get_chat_history(self, session_id: str, limit: Optional[int] = None) -> list[Message]:
         """Get the chat history for a given thread ID.
 
         Args:
             session_id (str): The session ID for the conversation.
+            limit (Optional[int]): If set, return only the most recent ``limit``
+                messages (the checkpointer holds the full thread in memory, so
+                this bounds the response payload rather than the read).
 
         Returns:
             list[Message]: The chat history.
@@ -414,7 +417,10 @@ class LangGraphAgent:
 
         config: RunnableConfig = {"configurable": {"thread_id": session_id}}
         state: StateSnapshot = await graph.aget_state(config=config)
-        return self.__process_messages(state.values["messages"]) if state.values else []
+        if not state.values:
+            return []
+        messages = self.__process_messages(state.values["messages"])
+        return messages[-limit:] if limit else messages
 
     def __process_messages(self, messages: list[BaseMessage]) -> list[Message]:
         openai_style_messages = convert_to_openai_messages(messages)

@@ -121,7 +121,7 @@ class ValkeyCacheService:
             host=settings.cache.valkey_host,
             port=settings.cache.valkey_port,
             db=settings.cache.valkey_db,
-            password=settings.cache.valkey_password or None,
+            password=settings.cache.valkey_password.get_secret_value() or None,
             max_connections=settings.cache.valkey_max_connections,
             decode_responses=True,
         )

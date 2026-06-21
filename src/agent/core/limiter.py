@@ -17,7 +17,8 @@ from agent.core.logging import logger
 # Build storage URI for Valkey if configured
 _storage_uri = None
 if settings.cache.valkey_host:
-    _password_part = f":{settings.cache.valkey_password}@" if settings.cache.valkey_password else ""
+    _valkey_password = settings.cache.valkey_password.get_secret_value()
+    _password_part = f":{_valkey_password}@" if _valkey_password else ""
     _storage_uri = f"redis://{_password_part}{settings.cache.valkey_host}:{settings.cache.valkey_port}/{settings.cache.valkey_db}"
     logger.info("rate_limiter_using_valkey", host=settings.cache.valkey_host, port=settings.cache.valkey_port)
 

@@ -10,6 +10,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
     Request,
 )
 from fastapi.responses import StreamingResponse
@@ -60,7 +61,7 @@ async def chat(
         )
 
         if settings.llm.session_naming_enabled:
-            maybe_name_session(session.id, session.name, chat_request.messages)
+            await maybe_name_session(session.id, session.name, chat_request.messages)
 
         result = await agent.get_response(
             chat_request.messages, session.id, user_id=str(session.user_id), username=session.username
@@ -71,7 +72,7 @@ async def chat(
         return ChatResponse(messages=result)
     except Exception as e:
         logger.exception("chat_request_failed", session_id=session.id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/chat/stream")
@@ -102,7 +103,7 @@ async def chat_stream(
         )
 
         if settings.llm.session_naming_enabled:
-            maybe_name_session(session.id, session.name, chat_request.messages)
+            await maybe_name_session(session.id, session.name, chat_request.messages)
 
         async def event_generator():
             """Generate streaming events.
@@ -131,7 +132,7 @@ async def chat_stream(
                     session_id=session.id,
                     error=str(e),
                 )
-                error_response = StreamResponse(content=str(e), done=True)
+                error_response = StreamResponse(content="Internal server error", done=True)
                 yield f"data: {json.dumps(error_response.model_dump(mode='json'))}\n\n"
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -142,7 +143,7 @@ async def chat_stream(
             session_id=session.id,
             error=str(e),
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/messages", response_model=ChatResponse)
@@ -150,25 +151,27 @@ async def chat_stream(
 async def get_session_messages(
     request: Request,
     session: Session = Depends(get_current_session),
+    limit: int = Query(default=50, ge=1, le=200),
 ):
-    """Get all messages for a session.
+    """Get the most recent messages for a session.
 
     Args:
         request: The FastAPI request object for rate limiting.
         session: The current session from the auth token.
+        limit: Max messages to return (1-200, default 50, most recent first-truncated).
 
     Returns:
-        ChatResponse: All messages in the session.
+        ChatResponse: The session's most recent messages.
 
     Raises:
         HTTPException: If there's an error retrieving the messages.
     """
     try:
-        messages = await agent.get_chat_history(session.id)
+        messages = await agent.get_chat_history(session.id, limit=limit)
         return ChatResponse(messages=messages)
     except Exception as e:
         logger.exception("get_messages_failed", session_id=session.id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/messages")
@@ -191,4 +194,4 @@ async def clear_chat_history(
         return {"message": "Chat history cleared successfully"}
     except Exception as e:
         logger.exception("clear_chat_history_failed", session_id=session.id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

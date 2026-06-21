@@ -16,7 +16,7 @@ def langfuse_init():
     langfuse = Langfuse(
         tracing_enabled=settings.langfuse.tracing_enabled,
         public_key=settings.langfuse.public_key,
-        secret_key=settings.langfuse.secret_key,
+        secret_key=settings.langfuse.secret_key.get_secret_value(),
         host=settings.langfuse.host,
         environment=settings.app.environment.value,
         debug=settings.app.debug,

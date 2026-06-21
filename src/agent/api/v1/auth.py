@@ -13,6 +13,7 @@ from fastapi import (
     Depends,
     Form,
     HTTPException,
+    Query,
     Request,
 )
 
@@ -80,6 +81,7 @@ async def register_user(
             password=User.hash_password(password),
             username=sanitized_username,
         )
+        assert user.id is not None  # set after insert + refresh
 
         token = create_access_token(str(user.id))
         return UserResponse(id=user.id, email=user.email, username=user.username, token=token)
@@ -153,6 +155,7 @@ async def create_session(
         SessionResponse: The session ID, name, and access token.
     """
     try:
+        assert user.id is not None  # authenticated user is always persisted
         session_id = str(uuid.uuid4())
         session = await sessions.create(session_id, user.id, username=user.username)
         token = create_access_token(session_id)
@@ -237,18 +240,23 @@ async def delete_session(
 async def get_user_sessions(
     user: User = Depends(get_current_user),
     sessions: SessionRepository = Depends(get_session_repository),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
 ):
-    """Get all sessions for the authenticated user.
+    """Get a page of sessions for the authenticated user.
 
     Args:
         user: The authenticated user.
         sessions: Injected session repository.
+        limit: Max sessions to return (1-100, default 20).
+        offset: Number of sessions to skip for pagination.
 
     Returns:
-        List[SessionResponse]: List of the user's sessions.
+        List[SessionResponse]: A page of the user's sessions.
     """
     try:
-        user_sessions = await sessions.list_for_user(user.id)
+        assert user.id is not None  # authenticated user is always persisted
+        user_sessions = await sessions.list_for_user(user.id, limit=limit, offset=offset)
         return [
             SessionResponse(
                 session_id=sanitize_string(session.id),

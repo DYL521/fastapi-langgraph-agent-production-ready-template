@@ -24,11 +24,11 @@ class MemoryService:
                 config_dict={
                     "vector_store": get_vector_store_config(),
                     "llm": {
-                        "provider": "openai",
+                        "provider": settings.memory.llm_provider,
                         "config": {"model": settings.memory.model},
                     },
                     "embedder": {
-                        "provider": "openai",
+                        "provider": settings.memory.embedder_provider,
                         "config": {"model": settings.memory.embedder_model},
                     },
                 }
