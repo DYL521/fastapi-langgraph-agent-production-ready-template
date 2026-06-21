@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.121.0",
+    "greenlet>=3.0.0",  # required by SQLAlchemy async (AsyncEngine/AsyncSession)
     "langchain>=1.0.5",
     "langchain-core>=1.0.4",
     "langchain-openai>=1.0.2",
@@ -63,11 +64,13 @@ cache = [
     "valkey[libvalkey]>=6.1.0",
 ]
 mysql = [
-    "asyncmy>=0.2.9",                              # async MySQL driver (SQLAlchemy + aiomysql pool)
+    "aiomysql>=0.2.0",                             # async MySQL driver (SQLAlchemy AsyncEngine + checkpointer pool)
     "pymysql>=1.1.0",                              # sync MySQL driver (alembic / db tooling)
     "langgraph-checkpoint-mysql[aiomysql]>=1.0.2", # LangGraph MySQL checkpointer (AIOMySQLSaver)
     "weaviate-client>=4.9.0",                      # mem0 weaviate vector store provider
 ]
+# LLM provider extras (LLM_PROVIDER selects the backend at runtime).
+anthropic = ["langchain-anthropic>=0.3"]           # Anthropic native chat models
 
 [dependency-groups]
 dev = [
@@ -76,12 +79,19 @@ dev = [
     "pyright>=1.1.390",
     "ruff>=0.11.4",
 ]
-test = ["httpx>=0.28.1", "pytest>=8.3.5"]
+test = [
+    "httpx>=0.28.1",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.24.0",
+    "aiosqlite>=0.20.0",  # in-memory async DB for integration tests
+]
 
 
 [tool.pytest.ini_options]
 markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
 python_files = ["test_*.py", "*_test.py", "tests.py"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.black]
 line-length = 119
