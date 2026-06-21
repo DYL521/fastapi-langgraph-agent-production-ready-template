@@ -8,50 +8,32 @@
 
 ---
 
-## 由 Atlas Cloud 驱动 —— 面向 LangGraph Agent 的即插即用 LLM 后端
+## LLM 提供方 —— 自带后端
 
-<div align="center">
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=fastapi-langgraph-agent-production-ready-template">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/atlas-cloud-logo-dark.png"/>
-      <img src="docs/atlas-cloud-logo.png" alt="Atlas Cloud" width="200"/>
-    </picture>
-  </a>
-</div>
+本 Agent **与提供方无关**。整个 LangGraph 图、工具调用、结构化输出和长期记忆都构建在 LangChain 的 `BaseChatModel` 之上,因此 LLM 后端完全由配置选择——设置 `LLM_PROVIDER` 和对应凭据即可,无需改动代码。
 
-[**Atlas Cloud**](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=fastapi-langgraph-agent-production-ready-template) 提供一个 **OpenAI 兼容的 LLM API**，可无缝接入本 FastAPI + LangGraph 模板——无需改动你的 Agent 图逻辑。只需替换 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY`，即可通过单一统一端点访问 **DeepSeek、Qwen、GLM、Kimi、MiniMax、Gemini、Claude、GPT** 等众多模型。
+| `LLM_PROVIDER` | 后端 | 安装 |
+|---|---|---|
+| `openai`(默认) | OpenAI **或任意 OpenAI 兼容端点**(DeepSeek、Together、自托管 vLLM/Ollama、Atlas Cloud 等),通过 `OPENAI_BASE_URL` 指定 | 内置 |
+| `anthropic` | Anthropic 原生(Claude) | `uv sync --extra anthropic` |
 
-本模板中的 `LLMRegistry` 使用 `langchain_openai.ChatOpenAI`——Atlas Cloud 与之线缆级兼容，因此你无需触碰任何 LangGraph 逻辑即可即刻使用 59+ 款精选推理模型。
+新增一个提供方只需在 `src/agent/services/llm/providers/` 下加一个适配器——见 [docs/llm-service.md](docs/llm-service.md)。
 
 ### 快速接入
 
-**第 1 步 —— 获取免费 API Key：** [atlascloud.ai/console/coding-plan](https://www.atlascloud.ai/console/coding-plan)
-
-**第 2 步 —— 更新 `.env.development`：**
-
 ```env
-OPENAI_API_KEY=<your-atlascloud-key>
-OPENAI_BASE_URL=https://api.atlascloud.ai/v1
-DEFAULT_LLM_MODEL=deepseek-ai/deepseek-v4-pro
+LLM_PROVIDER=openai
+OPENAI_API_KEY=<your-key>
+# OPENAI_BASE_URL=https://api.openai.com/v1   # 或任意 OpenAI 兼容端点
+DEFAULT_LLM_MODEL=gpt-4o-mini
+# 可选的环形 fallback 模型链(逗号分隔):
+# LLM_FALLBACK_MODELS=gpt-4o,gpt-4o-mini
 ```
 
-**第 3 步 —— 或直接在代码中使用：**
-
-```python
-from langchain_openai import ChatOpenAI
-
-llm = ChatOpenAI(
-    model="deepseek-ai/deepseek-v4-pro",
-    openai_api_base="https://api.atlascloud.ai/v1",
-    openai_api_key="<your-atlascloud-key>",
-    max_tokens=512,  # 推理模型要求 max_tokens >= 512
-)
-```
-
-它可作为任何使用 `ChatOpenAI` 之处的即插即用替代品——包括 `LLMRegistry`、环形 fallback 服务，以及 mem0 长期记忆。
+> **OpenAI 兼容端点** —— [Atlas Cloud](https://www.atlascloud.ai/)、DeepSeek、Together 或自托管 vLLM/Ollama 等,只需保持 `LLM_PROVIDER=openai` 并将 `OPENAI_BASE_URL` 指向它们,即可通过同一套线缆协议访问众多模型,无需触碰图逻辑。
 
 <details>
-<summary>📋 完整模型目录（提供 59 款 LLM）</summary>
+<summary>📋 通过 OpenAI 兼容端点(如 Atlas Cloud)可访问的示例模型</summary>
 
 | 模型 ID | 提供方 |
 |---|---|
@@ -212,7 +194,7 @@ LangGraph 的基础快速上手到"Agent 能在本地跑起来"就停了。本�
 推荐但非必需。`make docker-up` 会同时启动 API + PostgreSQL。仅本地搭建见 [docs/getting-started.md](docs/getting-started.md)。
 
 **支持哪些 LLM 提供方？**
-任何提供 OpenAI 兼容对话接口的提供商都可以。`src/agent/services/llm/registry.py` 中的 `LLMRegistry` 基于 `langchain_openai.ChatOpenAI`，因此 Atlas Cloud、OpenAI 等端点开箱即用。在 `.env.development` 中配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY` 和 `DEFAULT_LLM_MODEL`。
+后端由 `LLM_PROVIDER` 选择。`openai`(默认)覆盖 OpenAI 及任意 OpenAI 兼容端点(设置 `OPENAI_BASE_URL` 即可接入 DeepSeek、Together、vLLM/Ollama、Atlas Cloud 等);`anthropic` 原生运行 Claude(`uv sync --extra anthropic`)。一切都构建在 LangChain 的 `BaseChatModel` 之上,新增提供方只需在 `src/agent/services/llm/providers/` 下加一个适配器。详见 [docs/llm-service.md](docs/llm-service.md)。
 
 **可以用 MySQL 替代 PostgreSQL 吗？**
 可以。设置 `DB_DIALECT=mysql`，并以 `.env.mysql.example` 为起点。需要 MySQL 8+。安装额外驱动：`uv sync --extra mysql`，然后用 `COMPOSE_PROFILES=mysql make stack-up` 启动完整栈。此时 checkpointer 切换为 `AIOMySQLSaver`，长期记忆默认使用 Weaviate。详见 [docs/database.md](docs/database.md)。
