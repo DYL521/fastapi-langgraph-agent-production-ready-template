@@ -30,7 +30,7 @@ class User(BaseModel, table=True):
         sessions: Relationship to user's chat sessions
     """
 
-    id: int = Field(default=None, primary_key=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True)
     hashed_password: str
     username: Optional[str] = Field(default=None, index=False)

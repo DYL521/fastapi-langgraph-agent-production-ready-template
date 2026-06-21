@@ -5,6 +5,7 @@ from typing import (
     Optional,
 )
 
+from sqlalchemy import Index
 from sqlmodel import (
     Field,
     Relationship,
@@ -28,6 +29,10 @@ class Session(BaseModel, table=True):
         messages: Relationship to session messages
         user: Relationship to the session owner
     """
+
+    # Composite index serves `WHERE user_id = ? ORDER BY created_at` (list_for_user)
+    # and the user_id-prefix lookup, avoiding a sequential scan + sort.
+    __table_args__ = (Index("ix_session_user_created", "user_id", "created_at"),)
 
     id: str = Field(primary_key=True)
     user_id: int = Field(foreign_key="user.id")

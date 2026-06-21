@@ -8,12 +8,15 @@ from urllib.parse import quote_plus
 
 from agent.core.config import settings
 
-# (dialect, async) -> SQLAlchemy driver prefix
+# (dialect, async) -> SQLAlchemy driver prefix.
+# Async MySQL uses aiomysql — the same driver the LangGraph checkpointer uses —
+# so a MySQL deployment needs a single async driver. (Note: SQLAlchemy's
+# pool_pre_ping is disabled for MySQL async; see Database in services/database.py.)
 _DRIVERS = {
     ("postgres", False): "postgresql+psycopg2",
     ("postgres", True): "postgresql+psycopg",
     ("mysql", False): "mysql+pymysql",
-    ("mysql", True): "mysql+asyncmy",
+    ("mysql", True): "mysql+aiomysql",
 }
 
 
@@ -35,7 +38,7 @@ def build_sqlalchemy_url(async_: bool = False) -> str:
         raise ValueError(f"unsupported DB_DIALECT: {settings.database.dialect!r} (expected 'postgres' or 'mysql')")
 
     user = quote_plus(settings.database.user)
-    password = quote_plus(settings.database.password)
+    password = quote_plus(settings.database.password.get_secret_value())
     url = f"{driver}://{user}:{password}@{settings.database.host}:{settings.database.port}/{settings.database.name}"
 
     # MySQL connections default to latin1; force utf8mb4 so the connection
