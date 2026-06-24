@@ -28,7 +28,7 @@ def get_vector_store_config() -> dict[str, Any]:
             "config": {
                 "collection_name": settings.memory.collection_name,
                 "cluster_url": settings.vector.weaviate_cluster_url,
-                "auth_client_secret": settings.vector.weaviate_api_key or None,
+                "auth_client_secret": settings.vector.weaviate_api_key.get_secret_value() or None,
             },
         }
 
@@ -39,7 +39,7 @@ def get_vector_store_config() -> dict[str, Any]:
                 "collection_name": settings.memory.collection_name,
                 "dbname": settings.database.name,
                 "user": settings.database.user,
-                "password": settings.database.password,
+                "password": settings.database.password.get_secret_value(),
                 "host": settings.database.host,
                 "port": settings.database.port,
             },

@@ -46,7 +46,7 @@ async def create_checkpointer_pool() -> Any:
 async def _create_postgres_pool() -> PostgresConnPool:
     connection_url = (
         "postgresql://"
-        f"{quote_plus(settings.database.user)}:{quote_plus(settings.database.password)}"
+        f"{quote_plus(settings.database.user)}:{quote_plus(settings.database.password.get_secret_value())}"
         f"@{settings.database.host}:{settings.database.port}/{settings.database.name}"
     )
     pool: PostgresConnPool = AsyncConnectionPool(
@@ -71,7 +71,7 @@ async def _create_mysql_pool() -> Any:
         host=settings.database.host,
         port=settings.database.port,
         user=settings.database.user,
-        password=settings.database.password,
+        password=settings.database.password.get_secret_value(),
         db=settings.database.name,
         charset="utf8mb4",  # default is latin1; must match the utf8mb4 columns
         autocommit=True,  # required by AIOMySQLSaver

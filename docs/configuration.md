@@ -27,8 +27,13 @@ cp .env.example .env.development
 
 | Variable | Default | Required | Description |
 | --- | --- | --- | --- |
-| `OPENAI_API_KEY` | — | Yes | OpenAI API key |
-| `DEFAULT_LLM_MODEL` | `gpt-5-mini` | No | Starting model — see [LLM Service](llm-service.md) for fallback order |
+| `LLM_PROVIDER` | `openai` | No | Backend: `openai` (incl. OpenAI-compatible endpoints) or `anthropic` |
+| `OPENAI_API_KEY` | — | If `openai` | OpenAI (or compatible-endpoint) API key |
+| `OPENAI_BASE_URL` | — | No | OpenAI-compatible endpoint URL (DeepSeek, vLLM/Ollama, Atlas Cloud, …) |
+| `ANTHROPIC_API_KEY` | — | If `anthropic` | Anthropic API key (needs `uv sync --extra anthropic`) |
+| `DEFAULT_LLM_MODEL` | `gpt-5-mini` | No | Primary model — see [LLM Service](llm-service.md) |
+| `LLM_FALLBACK_MODELS` | — | No | Comma-separated circular-fallback models, tried in order |
+| `SESSION_NAMING_MODEL` | — | No | Dedicated model for session auto-naming (defaults to `DEFAULT_LLM_MODEL`) |
 | `DEFAULT_LLM_TEMPERATURE` | `0.2` | No | Temperature for chat completions |
 | `MAX_TOKENS` | `2000` | No | Max tokens per LLM response |
 | `MAX_LLM_CALL_RETRIES` | `3` | No | Retries per model before switching to fallback |
@@ -41,8 +46,10 @@ cp .env.example .env.development
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `LONG_TERM_MEMORY_COLLECTION_NAME` | `longterm_memory` | pgvector collection name |
+| `LONG_TERM_MEMORY_COLLECTION_NAME` | `longterm_memory` | Vector collection name |
+| `LONG_TERM_MEMORY_LLM_PROVIDER` | `openai` | mem0 LLM provider (independent of `LLM_PROVIDER`) |
 | `LONG_TERM_MEMORY_MODEL` | `gpt-5-nano` | LLM used by mem0 to extract memories |
+| `LONG_TERM_MEMORY_EMBEDDER_PROVIDER` | `openai` | mem0 embedder provider |
 | `LONG_TERM_MEMORY_EMBEDDER_MODEL` | `text-embedding-3-small` | Embedding model for semantic search |
 
 ---

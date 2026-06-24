@@ -92,4 +92,4 @@ def test_explicit_vector_provider_overrides_dialect_default(monkeypatch):
 
 def test_evaluation_api_key_falls_back_to_llm_key(monkeypatch):
     s = _isolated(monkeypatch, OPENAI_API_KEY="sk-from-llm")
-    assert s.evaluation.api_key == "sk-from-llm"
+    assert s.evaluation.api_key.get_secret_value() == "sk-from-llm"

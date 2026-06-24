@@ -104,7 +104,9 @@ class LoggingContextMiddleware(BaseHTTPMiddleware):
 
                 try:
                     # Decode token to get session_id (stored in "sub" claim)
-                    payload = jwt.decode(token, settings.jwt.secret_key, algorithms=[settings.jwt.algorithm])
+                    payload = jwt.decode(
+                        token, settings.jwt.secret_key.get_secret_value(), algorithms=[settings.jwt.algorithm]
+                    )
                     session_id = payload.get("sub")
 
                     if session_id:

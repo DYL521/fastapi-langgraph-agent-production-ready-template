@@ -14,13 +14,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from asgi_correlation_id import CorrelationIdMiddleware
+from asgi_correlation_id import (
+    CorrelationIdMiddleware,
+    correlation_id,
+)
 
 from agent.api.v1.api import api_router
 from agent.api.v1.chatbot import agent
 from agent.core.cache import cache_service
-from agent.core.config import settings
+from agent.core.config import (
+    Environment,
+    settings,
+)
 from agent.core.limiter import limiter
 from agent.core.logging import logger
 from agent.core.metrics import setup_metrics
@@ -76,6 +83,7 @@ async def lifespan(app: FastAPI):
     if agent._connection_pool:
         await agent._connection_pool.close()
         logger.info("connection_pool_closed")
+    await database.dispose()
     logger.info("application_shutdown")
 
 
@@ -108,43 +116,71 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # pyright: ignore[reportArgumentType]
 
 
-# Add validation exception handler
+# ---------------------------------------------------------------------------
+# Unified error envelope: {error:{code,message,details}, meta:{request_id}}
+# ---------------------------------------------------------------------------
+_STATUS_CODE_NAMES = {
+    400: "BAD_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    409: "CONFLICT",
+    422: "VALIDATION_ERROR",
+    429: "RATE_LIMIT_EXCEEDED",
+    500: "INTERNAL_ERROR",
+}
+
+
+def _error_response(status_code: int, code: str, message: str, details: list | None = None, headers=None) -> JSONResponse:
+    """Build a uniform error response with the current request id."""
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {"code": code, "message": message, "details": details or []},
+            "meta": {"request_id": correlation_id.get()},
+        },
+        headers=headers,
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handle validation errors from request data.
-
-    Args:
-        request: The request that caused the validation error
-        exc: The validation error
-
-    Returns:
-        JSONResponse: A formatted error response
-    """
-    # Log the validation error
-    logger.error(
-        "validation_error",
-        client_host=request.client.host if request.client else "unknown",
-        path=request.url.path,
-        errors=str(exc.errors()),
-    )
-
-    # Format the errors to be more user-friendly
-    formatted_errors = []
-    for error in exc.errors():
-        loc = " -> ".join([str(loc_part) for loc_part in error["loc"] if loc_part != "body"])
-        formatted_errors.append({"field": loc, "message": error["msg"]})
-
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": "Validation error", "errors": formatted_errors},
-    )
+    """Return validation errors in the unified envelope."""
+    logger.warning("validation_error", path=request.url.path, errors=str(exc.errors()))
+    details = [
+        {
+            "field": " -> ".join(str(part) for part in error["loc"] if part != "body"),
+            "message": error["msg"],
+        }
+        for error in exc.errors()
+    ]
+    return _error_response(status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", "Request validation failed", details)
 
 
-# Set up CORS middleware
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Wrap HTTPExceptions (including auth headers) in the unified envelope."""
+    code = _STATUS_CODE_NAMES.get(exc.status_code, "HTTP_ERROR")
+    return _error_response(exc.status_code, code, str(exc.detail), headers=getattr(exc, "headers", None))
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Catch-all: log the traceback, return a generic 500 (no internal details leaked)."""
+    logger.exception("unhandled_exception", path=request.url.path)
+    return _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Internal server error")
+
+
+# Set up CORS middleware.
+# A wildcard origin is incompatible with credentialed requests (browsers reject
+# `Access-Control-Allow-Origin: *` with credentials) and is unsafe in production.
+_wildcard_cors = "*" in settings.app.allowed_origins
+if _wildcard_cors and settings.app.environment == Environment.PRODUCTION:
+    logger.warning("insecure_cors_wildcard_in_production", origins=settings.app.allowed_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.app.allowed_origins,
-    allow_credentials=True,
+    allow_credentials=not _wildcard_cors,
     allow_methods=["*"],
     allow_headers=["*"],
 )

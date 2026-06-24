@@ -5,6 +5,7 @@ from typing import Annotated
 
 from pydantic import (
     Field,
+    SecretStr,
     field_validator,
     model_validator,
 )
@@ -27,7 +28,7 @@ class CacheSettings(BaseSettings):
     valkey_host: str = Field(default="", validation_alias="VALKEY_HOST")
     valkey_port: int = Field(default=6379, validation_alias="VALKEY_PORT")
     valkey_db: int = Field(default=0, validation_alias="VALKEY_DB")
-    valkey_password: str = Field(default="", validation_alias="VALKEY_PASSWORD")
+    valkey_password: SecretStr = Field(default=SecretStr(""), validation_alias="VALKEY_PASSWORD")
     valkey_max_connections: int = Field(default=20, validation_alias="VALKEY_MAX_CONNECTIONS")
     ttl_seconds: int = Field(default=60, validation_alias="CACHE_TTL_SECONDS")
     max_items: int = Field(default=10000, validation_alias="CACHE_MAX_ITEMS")

@@ -114,6 +114,9 @@ This is a production-ready AI agent application built with:
 - Use LangChain's `CallbackHandler` from Langfuse for tracing all LLM calls
 - All LLM operations must have Langfuse tracing enabled
 
+### LLM providers
+- The LLM backend is selected by `LLM_PROVIDER` (`openai` | `anthropic`). Never hardcode `ChatOpenAI` or import a provider SDK directly outside `src/agent/services/llm/providers/` — go through `build_chat_model()` / the registry. Each provider adapter declares its own retryable/fatal exception types so `LLMService` stays provider-agnostic; never reference a specific SDK's exceptions in the service. See `docs/llm-service.md`.
+
 ### Memory (mem0ai)
 - Use `AsyncMemory` for semantic memory storage
 - Store memories per user_id for personalized experiences

@@ -105,6 +105,14 @@ List all sessions for the authenticated user. Requires a user token.
 
 - Passwords are hashed with bcrypt before storage — plaintext is never persisted.
 - JWTs include a `jti` (JWT ID) claim for token uniqueness.
+- Secrets (`JWT_SECRET_KEY`, DB password, API keys) are typed `SecretStr`, so they mask in logs and reprs.
 - All string inputs are sanitised before use.
 - Rate limits protect the register (10/hour) and login (20/min) endpoints against brute force.
 - Set a long random `JWT_SECRET_KEY` in production — at least 32 characters.
+
+## Production hardening checklist
+
+- **JWT lifetime** — the default `JWT_ACCESS_TOKEN_EXPIRE_DAYS=30` is convenient for development but long for production. Shorten it (e.g. hours) and, if you need long-lived sessions, layer a refresh-token flow on top.
+- **JWT algorithm** — `HS256` (symmetric) is the default. For multi-service setups prefer `RS256`/`ES256` (asymmetric) so only the issuer holds the signing key; set `JWT_ALGORITHM` accordingly and provide the key pair.
+- **CORS** — `ALLOWED_ORIGINS` defaults to `*` for local development. Set an explicit origin allow-list in production. The app automatically disables `allow_credentials` when the origin list is a wildcard (the two are incompatible) and logs a warning if a wildcard is used in the `production` environment.
+- **Rate-limit storage** — set `VALKEY_HOST` in production so limits are shared across workers; the in-memory fallback is per-process only.

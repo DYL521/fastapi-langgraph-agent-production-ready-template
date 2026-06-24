@@ -121,7 +121,22 @@ graph LR
 | LLM Service | `src/agent/services/llm/` | Model registry, retries, circular fallback, structured output |
 | Memory Service | `src/agent/services/memory.py` | mem0 semantic memory + cache |
 | Session Naming | `src/agent/services/session_naming.py` | Background LLM title generation for new sessions |
-| Database Service | `src/agent/services/database.py` | User/session CRUD |
+| Database | `src/agent/services/database.py` | Async engine + session factory + health checks |
+| Repositories | `src/agent/repositories/` | User/Session CRUD (async) over the shared engine |
 | Cache Service | `src/agent/core/cache.py` | Valkey/Redis with in-memory fallback |
 | Middleware | `src/agent/core/middleware.py` | Metrics, logging context, profiling |
 | Auth | `src/agent/api/v1/auth.py` | JWT creation, session management |
+
+## Error responses
+
+All errors return a uniform envelope (handlers in `src/agent/main.py`):
+
+```json
+{
+  "error": { "code": "VALIDATION_ERROR", "message": "Request validation failed",
+             "details": [{ "field": "email", "message": "value is not a valid email address" }] },
+  "meta": { "request_id": "417a09429b804bbc9c7fa6ac43c791e6" }
+}
+```
+
+`code` is a stable machine-readable string (e.g. `UNAUTHORIZED`, `NOT_FOUND`, `VALIDATION_ERROR`, `INTERNAL_ERROR`); `meta.request_id` is the correlation id for log tracing. Unhandled exceptions are logged with a full traceback but return a generic `INTERNAL_ERROR` message — internal details are never leaked. Secrets in settings are typed `SecretStr`, so they mask in logs/reprs.

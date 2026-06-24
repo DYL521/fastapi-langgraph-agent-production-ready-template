@@ -8,50 +8,32 @@ A production-ready template for building AI agent backends with FastAPI and Lang
 
 ---
 
-## Powered by Atlas Cloud — Drop-in LLM Backend for LangGraph Agents
+## LLM Providers — Bring Your Own Backend
 
-<div align="center">
-  <a href="https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=fastapi-langgraph-agent-production-ready-template">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/atlas-cloud-logo-dark.png"/>
-      <img src="docs/atlas-cloud-logo.png" alt="Atlas Cloud" width="200"/>
-    </picture>
-  </a>
-</div>
+The agent is **provider-agnostic**. The entire LangGraph graph, tool calling, structured output, and long-term memory are built on LangChain's `BaseChatModel`, so the LLM backend is chosen purely by configuration — set `LLM_PROVIDER` plus the matching credentials, no code changes.
 
-[**Atlas Cloud**](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=fastapi-langgraph-agent-production-ready-template) provides an **OpenAI-compatible LLM API** that integrates seamlessly into this FastAPI + LangGraph template — no code changes to your agent graph needed. Just swap `OPENAI_BASE_URL` and `OPENAI_API_KEY` to access **DeepSeek, Qwen, GLM, Kimi, MiniMax, Gemini, Claude, GPT** and more through a single unified endpoint.
+| `LLM_PROVIDER` | Backend | Install |
+|---|---|---|
+| `openai` (default) | OpenAI **or any OpenAI-compatible endpoint** (DeepSeek, Together, self-hosted vLLM/Ollama, Atlas Cloud, …) via `OPENAI_BASE_URL` | built-in |
+| `anthropic` | Anthropic native (Claude) | `uv sync --extra anthropic` |
 
-The `LLMRegistry` in this template uses `langchain_openai.ChatOpenAI` — Atlas Cloud is wire-compatible, so you get instant access to 59+ curated reasoning models without touching any LangGraph logic.
+Adding another provider is a single adapter in `src/agent/services/llm/providers/` — see [docs/llm-service.md](docs/llm-service.md).
 
 ### Quick Setup
 
-**Step 1 — Get your free API key:** [atlascloud.ai/console/coding-plan](https://www.atlascloud.ai/console/coding-plan)
-
-**Step 2 — Update `.env.development`:**
-
 ```env
-OPENAI_API_KEY=<your-atlascloud-key>
-OPENAI_BASE_URL=https://api.atlascloud.ai/v1
-DEFAULT_LLM_MODEL=deepseek-ai/deepseek-v4-pro
+LLM_PROVIDER=openai
+OPENAI_API_KEY=<your-key>
+# OPENAI_BASE_URL=https://api.openai.com/v1   # or any OpenAI-compatible endpoint
+DEFAULT_LLM_MODEL=gpt-4o-mini
+# optional circular-fallback chain (comma-separated):
+# LLM_FALLBACK_MODELS=gpt-4o,gpt-4o-mini
 ```
 
-**Step 3 — Or use directly in code:**
-
-```python
-from langchain_openai import ChatOpenAI
-
-llm = ChatOpenAI(
-    model="deepseek-ai/deepseek-v4-pro",
-    openai_api_base="https://api.atlascloud.ai/v1",
-    openai_api_key="<your-atlascloud-key>",
-    max_tokens=512,  # reasoning model requires max_tokens >= 512
-)
-```
-
-This works as a drop-in replacement anywhere `ChatOpenAI` is used in your LangGraph agent — including the `LLMRegistry`, the circular fallback service, and mem0 long-term memory.
+> **OpenAI-compatible endpoints** — providers like [Atlas Cloud](https://www.atlascloud.ai/), DeepSeek, Together, or a self-hosted vLLM/Ollama work with `LLM_PROVIDER=openai` by pointing `OPENAI_BASE_URL` at them, giving access to many models through one wire protocol without touching the graph.
 
 <details>
-<summary>📋 Full model catalog (59 LLMs available)</summary>
+<summary>📋 Example models reachable through an OpenAI-compatible endpoint (e.g. Atlas Cloud)</summary>
 
 | Model ID | Provider |
 |---|---|
@@ -212,7 +194,7 @@ The base LangGraph quickstart stops at "agent runs locally". This template adds 
 Recommended but not required. `make docker-up` starts the API + PostgreSQL together. For local-only setup see [docs/getting-started.md](docs/getting-started.md).
 
 **Which LLM providers are supported?**
-Any provider that exposes an OpenAI-compatible chat completions API. The `LLMRegistry` in `src/agent/services/llm/registry.py` is built on `langchain_openai.ChatOpenAI`, so Atlas Cloud, OpenAI, and similar endpoints work out of the box. Configure `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `DEFAULT_LLM_MODEL` in `.env.development`.
+The backend is selected by `LLM_PROVIDER`. `openai` (default) covers OpenAI and any OpenAI-compatible endpoint (set `OPENAI_BASE_URL` for DeepSeek, Together, vLLM/Ollama, Atlas Cloud, …); `anthropic` runs Claude natively (`uv sync --extra anthropic`). Everything is built on LangChain's `BaseChatModel`, so adding a provider is a single adapter under `src/agent/services/llm/providers/`. See [docs/llm-service.md](docs/llm-service.md).
 
 **Can I use MySQL instead of PostgreSQL?**
 Yes. Set `DB_DIALECT=mysql` and use `.env.mysql.example` as your starting point. MySQL 8+ is required. Install the extra drivers with `uv sync --extra mysql`, then start the stack with `COMPOSE_PROFILES=mysql make stack-up`. The checkpointer switches to `AIOMySQLSaver` and long-term memory defaults to Weaviate. See [docs/database.md](docs/database.md).

@@ -15,6 +15,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 
+from agent.core.config import settings
 from agent.core.logging import logger
 from agent.core.metrics import session_names_generated_total
 from agent.core.prompts import SESSION_TITLE_PROMPT
@@ -38,9 +39,8 @@ async def _persist_session_name(session_id: str, user_message: str) -> None:
                 SystemMessage(content=SESSION_TITLE_PROMPT),
                 HumanMessage(content=user_message[:500]),
             ],
-            model_name="gpt-5.4-nano",
+            model_name=settings.llm.session_naming_model or settings.llm.model,
             response_format=SessionTitle,
-            reasoning={"effort": "low"},
             max_tokens=32,
             temperature=0.3,
         )
@@ -52,7 +52,7 @@ async def _persist_session_name(session_id: str, user_message: str) -> None:
         logger.exception("session_name_generation_failed", session_id=session_id)
 
 
-def maybe_name_session(session_id: str, session_name: str, messages: list) -> None:
+async def maybe_name_session(session_id: str, session_name: str, messages: list) -> None:
     """Trigger session auto-naming if the session is still unnamed.
 
     Safe to call from any chat endpoint — concurrent callers for the same
@@ -63,5 +63,5 @@ def maybe_name_session(session_id: str, session_name: str, messages: list) -> No
     first_user_msg = next((m.content for m in messages if m.role == "user"), None)
     if not first_user_msg:
         return
-    if session_repository.claim_name(session_id, _build_placeholder(first_user_msg)):
+    if await session_repository.claim_name(session_id, _build_placeholder(first_user_msg)):
         spawn_background_task(_persist_session_name(session_id, first_user_msg))

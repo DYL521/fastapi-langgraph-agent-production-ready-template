@@ -49,7 +49,7 @@ three layers** — no business code changes.
 
 | Layer | `postgres` (default) | `mysql` |
 |-------|----------------------|---------|
-| Relational (User/Session/Thread) | psycopg2 / psycopg | asyncmy / pymysql |
+| Relational (User/Session/Thread) | psycopg2 / psycopg (async) | pymysql / aiomysql (async) |
 | LangGraph checkpointer | `AsyncPostgresSaver` | `AIOMySQLSaver` |
 | Long-term memory vector store | pgvector (same DB) | Weaviate (standalone) |
 
@@ -73,7 +73,7 @@ Defaults derive from the dialect: port `5432`/`3306`, and vector provider
 ### Running on MySQL
 
 ```bash
-uv sync --extra mysql                      # asyncmy, pymysql, langgraph-checkpoint-mysql, weaviate-client
+uv sync --extra mysql                      # aiomysql, pymysql, langgraph-checkpoint-mysql, weaviate-client
 COMPOSE_PROFILES=mysql make stack-up       # starts mysql + weaviate (see docker-compose.yml)
 make migrate                               # alembic creates the relational tables on MySQL 8+
 ```
@@ -87,7 +87,28 @@ make migrate                               # alembic creates the relational tabl
 > MySQL's index limit at `VARCHAR(255)`. Long-term memory does **not** migrate
 > between pgvector and Weaviate — switching the vector store starts memory fresh.
 
-The full design rationale is in [multi-database-design.md](../.venv/multi-database-design.md).
+> The relational layer uses an **async** SQLAlchemy engine (`AsyncSession`). For
+> MySQL, `pool_pre_ping` is disabled because aiomysql's `ping()` is incompatible
+> with SQLAlchemy's pre-ping; `pool_recycle` still guards stale connections.
+> PostgreSQL (psycopg async) keeps pre-ping enabled.
+
+The full design rationale is in [multi-database-design.md](multi-database-design.md).
+
+### Connection pools
+
+The app maintains **three independent pools** to the database, by necessity —
+they use different connection abstractions and cannot be shared:
+
+| Pool | Library | Size config |
+|------|---------|-------------|
+| Relational ORM (User/Session) | SQLAlchemy `AsyncEngine` | `DB_POOL_SIZE` + `DB_MAX_OVERFLOW` |
+| LangGraph checkpointer | raw psycopg / aiomysql pool | `DB_POOL_SIZE` |
+| Long-term memory | mem0-managed (pgvector/Weaviate) | internal |
+
+The two pools the app controls both honor `DB_POOL_SIZE`. **Operational note:**
+peak connections per worker ≈ `(DB_POOL_SIZE + DB_MAX_OVERFLOW) + DB_POOL_SIZE +
+mem0`, multiplied by the number of uvicorn workers — size the database's
+`max_connections` (or a PgBouncer/ProxySQL layer) accordingly.
 
 ---
 

@@ -1,22 +1,24 @@
 """This file contains the graph utilities for the application."""
 
-import tiktoken
+from typing import cast
+
 from langchain_core.messages import BaseMessage
 from langchain_core.messages import trim_messages as _trim_messages
 
 from agent.core.config import settings
 from agent.core.logging import logger
 from agent.schemas import Message
-
-# Cache tiktoken encoding at module level — thread-safe and reusable
-try:
-    _TIKTOKEN_ENCODING = tiktoken.encoding_for_model(settings.llm.model)
-except KeyError:
-    _TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
+from agent.services.llm.providers import get_active_provider
 
 
-def _count_tokens_tiktoken(messages: list) -> int:
-    """Count tokens locally using tiktoken — no API call needed."""
+def _count_tokens(messages: list) -> int:
+    """Count tokens for trimming using the active provider's tokenizer.
+
+    OpenAI uses an exact local tiktoken count; other providers fall back to a
+    conservative char-based estimate (see ``LLMProvider.count_tokens``) — no API
+    round-trips on this hot path.
+    """
+    count = get_active_provider().count_tokens
     num_tokens = 0
     for message in messages:
         # Every message has overhead tokens for role/name
@@ -24,17 +26,17 @@ def _count_tokens_tiktoken(messages: list) -> int:
         if isinstance(message, dict):
             for _, value in message.items():
                 if isinstance(value, str):
-                    num_tokens += len(_TIKTOKEN_ENCODING.encode(value))
+                    num_tokens += count(value)
         elif isinstance(message, BaseMessage):
             content = message.content
             if isinstance(content, str):
-                num_tokens += len(_TIKTOKEN_ENCODING.encode(content))
+                num_tokens += count(content)
             elif isinstance(content, list):
                 for block in content:
                     if isinstance(block, str):
-                        num_tokens += len(_TIKTOKEN_ENCODING.encode(block))
+                        num_tokens += count(block)
                     elif isinstance(block, dict) and "text" in block:
-                        num_tokens += len(_TIKTOKEN_ENCODING.encode(block["text"]))
+                        num_tokens += count(block["text"])
     num_tokens += 2  # every reply is primed with assistant
     return num_tokens
 
@@ -116,7 +118,7 @@ def prepare_messages(messages: list[Message], system_prompt: str) -> list[Messag
         trimmed_messages = _trim_messages(
             dump_messages(messages),
             strategy="last",
-            token_counter=_count_tokens_tiktoken,
+            token_counter=_count_tokens,
             max_tokens=settings.llm.max_tokens,
             start_on="human",
             include_system=False,
@@ -135,4 +137,6 @@ def prepare_messages(messages: list[Message], system_prompt: str) -> list[Messag
         else:
             raise
 
-    return [Message(role="system", content=system_prompt)] + trimmed_messages
+    # trim_messages preserves the input shape at runtime; its stub widened to
+    # BaseMessage in newer langchain-core, so cast back to the declared contract.
+    return [Message(role="system", content=system_prompt), *cast(list[Message], trimmed_messages)]
