@@ -1,11 +1,5 @@
 """Chat session persistence (CRUD) backed by async SQLModel."""
 
-from typing import (
-    List,
-    Optional,
-)
-
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import (
     col,
@@ -14,6 +8,7 @@ from sqlmodel import (
 )
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from agent.core.exceptions import NotFoundError
 from agent.core.logging import logger
 from agent.models.session import Session as ChatSession
 from agent.services.database import database
@@ -26,7 +21,7 @@ class SessionRepository:
         """Bind the repository to an async session factory."""
         self.session_maker = session_maker
 
-    async def create(self, session_id: str, user_id: int, name: str = "", username: str | None = None) -> ChatSession:
+    async def create(self, session_id: str, user_id: int, name: str = "", username: str | None = None) -> ChatSession:  # noqa: E501
         """Create a new chat session."""
         async with self.session_maker() as session:
             chat_session = ChatSession(id=session_id, user_id=user_id, name=name, username=username)
@@ -51,12 +46,12 @@ class SessionRepository:
             logger.info("session_deleted", session_id=session_id)
             return True
 
-    async def get(self, session_id: str) -> Optional[ChatSession]:
+    async def get(self, session_id: str) -> ChatSession | None:
         """Get a session by ID."""
         async with self.session_maker() as session:
             return await session.get(ChatSession, session_id)
 
-    async def list_for_user(self, user_id: int, limit: int = 20, offset: int = 0) -> List[ChatSession]:
+    async def list_for_user(self, user_id: int, limit: int = 20, offset: int = 0) -> list[ChatSession]:
         """List a page of a user's sessions, oldest first.
 
         Args:
@@ -79,12 +74,12 @@ class SessionRepository:
         """Update a session's name.
 
         Raises:
-            HTTPException: If the session is not found.
+            NotFoundError: If the session is not found.
         """
         async with self.session_maker() as session:
             chat_session = await session.get(ChatSession, session_id)
             if not chat_session:
-                raise HTTPException(status_code=404, detail="Session not found")
+                raise NotFoundError("Session", session_id)
             chat_session.name = name
             session.add(chat_session)
             await session.commit()

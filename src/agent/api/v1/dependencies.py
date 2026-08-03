@@ -51,7 +51,7 @@ async def get_current_user(
 
         user_id = verify_token(token)
         if user_id is None:
-            logger.error("invalid_token", token_part=token[:10] + "...")
+            logger.error("invalid_token")
             raise HTTPException(
                 status_code=401,
                 detail="Invalid authentication credentials",
@@ -92,7 +92,7 @@ async def get_current_session(
 
         session_id = verify_token(token)
         if session_id is None:
-            logger.error("session_id_not_found", token_part=token[:10] + "...")
+            logger.error("invalid_session_token")
             raise HTTPException(
                 status_code=401,
                 detail="Invalid authentication credentials",
