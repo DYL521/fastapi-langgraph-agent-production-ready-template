@@ -1,15 +1,10 @@
-"""Chatbot API endpoints for handling chat interactions.
-
-This module provides endpoints for chat interactions, including regular chat,
-streaming chat, message history management, and chat history clearing.
-"""
+"""Chatbot API endpoints for handling chat interactions."""
 
 import json
 
 from fastapi import (
     APIRouter,
     Depends,
-    HTTPException,
     Query,
     Request,
 )
@@ -30,7 +25,11 @@ from agent.schemas.chat import (
 from agent.services.session_naming import maybe_name_session
 
 router = APIRouter()
-agent = LangGraphAgent()
+
+
+def get_agent(request: Request) -> LangGraphAgent:
+    """Resolve the LangGraphAgent from app state."""
+    return request.app.state.agent
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -39,40 +38,25 @@ async def chat(
     request: Request,
     chat_request: ChatRequest,
     session: Session = Depends(get_current_session),
+    agent: LangGraphAgent = Depends(get_agent),
 ):
-    """Process a chat request using LangGraph.
+    """Process a chat request using LangGraph."""
+    logger.info(
+        "chat_request_received",
+        session_id=session.id,
+        message_count=len(chat_request.messages),
+    )
 
-    Args:
-        request: The FastAPI request object for rate limiting.
-        chat_request: The chat request containing messages.
-        session: The current session from the auth token.
+    if settings.llm.session_naming_enabled:
+        await maybe_name_session(agent.llm_service, session.id, session.name, chat_request.messages)
 
-    Returns:
-        ChatResponse: The processed chat response.
+    result = await agent.get_response(
+        chat_request.messages, session.id, user_id=str(session.user_id), username=session.username
+    )
 
-    Raises:
-        HTTPException: If there's an error processing the request.
-    """
-    try:
-        logger.info(
-            "chat_request_received",
-            session_id=session.id,
-            message_count=len(chat_request.messages),
-        )
+    logger.info("chat_request_processed", session_id=session.id)
 
-        if settings.llm.session_naming_enabled:
-            await maybe_name_session(session.id, session.name, chat_request.messages)
-
-        result = await agent.get_response(
-            chat_request.messages, session.id, user_id=str(session.user_id), username=session.username
-        )
-
-        logger.info("chat_request_processed", session_id=session.id)
-
-        return ChatResponse(messages=result)
-    except Exception as e:
-        logger.exception("chat_request_failed", session_id=session.id, error=str(e))
-        raise HTTPException(status_code=500, detail="Internal server error")
+    return ChatResponse(messages=result)
 
 
 @router.post("/chat/stream")
@@ -81,69 +65,40 @@ async def chat_stream(
     request: Request,
     chat_request: ChatRequest,
     session: Session = Depends(get_current_session),
+    agent: LangGraphAgent = Depends(get_agent),
 ):
-    """Process a chat request using LangGraph with streaming response.
+    """Process a chat request using LangGraph with streaming response."""
+    logger.info(
+        "stream_chat_request_received",
+        session_id=session.id,
+        message_count=len(chat_request.messages),
+    )
 
-    Args:
-        request: The FastAPI request object for rate limiting.
-        chat_request: The chat request containing messages.
-        session: The current session from the auth token.
+    if settings.llm.session_naming_enabled:
+        await maybe_name_session(agent.llm_service, session.id, session.name, chat_request.messages)
 
-    Returns:
-        StreamingResponse: A streaming response of the chat completion.
+    async def event_generator():
+        try:
+            with llm_stream_duration_seconds.labels(model=agent.llm_service.get_llm().get_name()).time():
+                async for chunk in agent.get_stream_response(
+                    chat_request.messages, session.id, user_id=str(session.user_id), username=session.username
+                ):
+                    response = StreamResponse(content=chunk, done=False)
+                    yield f"data: {json.dumps(response.model_dump(mode='json'))}\n\n"
 
-    Raises:
-        HTTPException: If there's an error processing the request.
-    """
-    try:
-        logger.info(
-            "stream_chat_request_received",
-            session_id=session.id,
-            message_count=len(chat_request.messages),
-        )
+            final_response = StreamResponse(content="", done=True)
+            yield f"data: {json.dumps(final_response.model_dump(mode='json'))}\n\n"
 
-        if settings.llm.session_naming_enabled:
-            await maybe_name_session(session.id, session.name, chat_request.messages)
+        except Exception as e:
+            logger.exception(
+                "stream_chat_request_failed",
+                session_id=session.id,
+                error=str(e),
+            )
+            error_response = StreamResponse(content="Internal server error", done=True)
+            yield f"data: {json.dumps(error_response.model_dump(mode='json'))}\n\n"
 
-        async def event_generator():
-            """Generate streaming events.
-
-            Yields:
-                str: Server-sent events in JSON format.
-
-            Raises:
-                Exception: If there's an error during streaming.
-            """
-            try:
-                with llm_stream_duration_seconds.labels(model=agent.llm_service.get_llm().get_name()).time():
-                    async for chunk in agent.get_stream_response(
-                        chat_request.messages, session.id, user_id=str(session.user_id), username=session.username
-                    ):
-                        response = StreamResponse(content=chunk, done=False)
-                        yield f"data: {json.dumps(response.model_dump(mode='json'))}\n\n"
-
-                # Send final message indicating completion
-                final_response = StreamResponse(content="", done=True)
-                yield f"data: {json.dumps(final_response.model_dump(mode='json'))}\n\n"
-
-            except Exception as e:
-                logger.exception(
-                    "stream_chat_request_failed",
-                    session_id=session.id,
-                    error=str(e),
-                )
-                error_response = StreamResponse(content="Internal server error", done=True)
-                yield f"data: {json.dumps(error_response.model_dump(mode='json'))}\n\n"
-
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-    except Exception as e:
-        logger.exception(
-            "stream_chat_request_failed",
-            session_id=session.id,
-            error=str(e),
-        )
-        raise HTTPException(status_code=500, detail="Internal server error")
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/messages", response_model=ChatResponse)
@@ -151,27 +106,12 @@ async def chat_stream(
 async def get_session_messages(
     request: Request,
     session: Session = Depends(get_current_session),
+    agent: LangGraphAgent = Depends(get_agent),
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    """Get the most recent messages for a session.
-
-    Args:
-        request: The FastAPI request object for rate limiting.
-        session: The current session from the auth token.
-        limit: Max messages to return (1-200, default 50, most recent first-truncated).
-
-    Returns:
-        ChatResponse: The session's most recent messages.
-
-    Raises:
-        HTTPException: If there's an error retrieving the messages.
-    """
-    try:
-        messages = await agent.get_chat_history(session.id, limit=limit)
-        return ChatResponse(messages=messages)
-    except Exception as e:
-        logger.exception("get_messages_failed", session_id=session.id, error=str(e))
-        raise HTTPException(status_code=500, detail="Internal server error")
+    """Get the most recent messages for a session."""
+    messages = await agent.get_chat_history(session.id, limit=limit)
+    return ChatResponse(messages=messages)
 
 
 @router.delete("/messages")
@@ -179,19 +119,8 @@ async def get_session_messages(
 async def clear_chat_history(
     request: Request,
     session: Session = Depends(get_current_session),
+    agent: LangGraphAgent = Depends(get_agent),
 ):
-    """Clear all messages for a session.
-
-    Args:
-        request: The FastAPI request object for rate limiting.
-        session: The current session from the auth token.
-
-    Returns:
-        dict: A message indicating the chat history was cleared.
-    """
-    try:
-        await agent.clear_chat_history(session.id)
-        return {"message": "Chat history cleared successfully"}
-    except Exception as e:
-        logger.exception("clear_chat_history_failed", session_id=session.id, error=str(e))
-        raise HTTPException(status_code=500, detail="Internal server error")
+    """Clear all messages for a session."""
+    await agent.clear_chat_history(session.id)
+    return {"message": "Chat history cleared successfully"}
