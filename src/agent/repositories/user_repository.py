@@ -6,7 +6,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from agent.core.logging import logger
 from agent.models.user import User
-from agent.services.database import database
 
 
 class UserRepository:
@@ -61,7 +60,3 @@ class UserRepository:
             await session.commit()
             logger.info("user_deleted", email=email)
             return True
-
-
-# Singleton bound to the shared async session factory.
-user_repository = UserRepository(database.session_maker)

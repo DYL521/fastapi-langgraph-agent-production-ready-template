@@ -19,7 +19,7 @@ from agent.core.config import settings
 from agent.core.logging import logger
 from agent.core.metrics import session_names_generated_total
 from agent.core.prompts import SESSION_TITLE_PROMPT
-from agent.repositories import session_repository
+from agent.repositories import SessionRepository
 from agent.schemas.chat import SessionTitle
 from agent.services.llm import LLMService
 from agent.utils import spawn_background_task
@@ -33,7 +33,9 @@ def _build_placeholder(user_message: str) -> str:
     return cleaned[:_PLACEHOLDER_MAX].rstrip() or "New chat"
 
 
-async def _persist_session_name(llm_service: LLMService, session_id: str, user_message: str) -> None:
+async def _persist_session_name(
+    llm_service: LLMService, session_repo: SessionRepository, session_id: str, user_message: str
+) -> None:
     """Generate a proper session title via LLM and persist it."""
     try:
         result = await llm_service.call(
@@ -46,7 +48,7 @@ async def _persist_session_name(llm_service: LLMService, session_id: str, user_m
             max_tokens=32,
             temperature=0.3,
         )
-        await session_repository.update_name(session_id, result.title)
+        await session_repo.update_name(session_id, result.title)
         session_names_generated_total.labels(status="success").inc()
         logger.info("session_name_generated", session_id=session_id, name=result.title)
     except Exception:
@@ -54,7 +56,9 @@ async def _persist_session_name(llm_service: LLMService, session_id: str, user_m
         logger.exception("session_name_generation_failed", session_id=session_id)
 
 
-async def maybe_name_session(llm_service: LLMService, session_id: str, session_name: str, messages: list) -> None:
+async def maybe_name_session(
+    llm_service: LLMService, session_repo: SessionRepository, session_id: str, session_name: str, messages: list
+) -> None:
     """Trigger session auto-naming if the session is still unnamed.
 
     Safe to call from any chat endpoint — concurrent callers for the same
@@ -65,5 +69,5 @@ async def maybe_name_session(llm_service: LLMService, session_id: str, session_n
     first_user_msg = next((m.content for m in messages if m.role == "user"), None)
     if not first_user_msg:
         return
-    if await session_repository.claim_name(session_id, _build_placeholder(first_user_msg)):
-        spawn_background_task(_persist_session_name(llm_service, session_id, first_user_msg))
+    if await session_repo.claim_name(session_id, _build_placeholder(first_user_msg)):
+        spawn_background_task(_persist_session_name(llm_service, session_repo, session_id, first_user_msg))

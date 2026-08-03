@@ -1,9 +1,11 @@
 """Shared fixtures for integration tests.
 
 Uses an in-memory async SQLite database (StaticPool so every session shares the
-one connection) and reroutes the singleton repositories to it, so the API can be
-exercised end-to-end with no external database or running services.
+one connection) and injects it into app.state.database, so the FastAPI dependency
+injection resolves repositories against the test DB automatically.
 """
+
+from types import SimpleNamespace
 
 import pytest_asyncio
 from httpx import (
@@ -43,17 +45,12 @@ async def session_maker():
 async def client(session_maker, monkeypatch):
     """Provide an httpx client wired to the app with the SQLite-backed repos."""
     from agent.core.limiter import limiter
-    from agent.repositories import (
-        session_repository,
-        user_repository,
-    )
 
-    # Route repository DB access to the test database and disable rate limiting.
-    monkeypatch.setattr(user_repository, "session_maker", session_maker)
-    monkeypatch.setattr(session_repository, "session_maker", session_maker)
     monkeypatch.setattr(limiter, "enabled", False)
 
     from agent.main import app
+
+    app.state.database = SimpleNamespace(session_maker=session_maker)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

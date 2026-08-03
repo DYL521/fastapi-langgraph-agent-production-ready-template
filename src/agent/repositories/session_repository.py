@@ -11,7 +11,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from agent.core.exceptions import NotFoundError
 from agent.core.logging import logger
 from agent.models.session import Session as ChatSession
-from agent.services.database import database
 
 
 class SessionRepository:
@@ -105,7 +104,3 @@ class SessionRepository:
             result = await session.exec(stmt)  # type: ignore[call-overload]
             await session.commit()
             return (result.rowcount or 0) == 1
-
-
-# Singleton bound to the shared async session factory.
-session_repository = SessionRepository(database.session_maker)

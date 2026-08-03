@@ -49,7 +49,7 @@ from agent.schemas import (
     Message,
 )
 from agent.services.llm import LLMService
-from agent.services.memory import memory_service
+from agent.services.memory import MemoryService
 from agent.utils import (
     dump_messages,
     extract_text_content,
@@ -61,9 +61,10 @@ from agent.utils import (
 class LangGraphAgent:
     """Manages the LangGraph Agent/workflow and interactions with the LLM."""
 
-    def __init__(self, llm_service: LLMService):
+    def __init__(self, llm_service: LLMService, memory_service: MemoryService):
         """Initialize the LangGraph Agent with necessary components."""
         self.llm_service = llm_service
+        self.memory_service = memory_service
         self.llm_service.bind_tools(tools)
         self.tools_by_name = {tool.name: tool for tool in tools}
         self._connection_pool: Any | None = None
@@ -103,7 +104,7 @@ class LangGraphAgent:
         """Run state check and memory search concurrently, return (state, graph_input)."""
         state, relevant_memory = await asyncio.gather(
             graph.aget_state(config),
-            memory_service.search(user_id, messages[-1].content),
+            self.memory_service.search(user_id, messages[-1].content),
         )
 
         if state.next:
@@ -265,7 +266,7 @@ class LangGraphAgent:
                 return [Message(role="assistant", content=str(interrupt_value))]
 
             openai_msgs = cast(list[dict], convert_to_openai_messages(response["messages"]))
-            spawn_background_task(memory_service.add(user_id, openai_msgs, config.get("metadata")))
+            spawn_background_task(self.memory_service.add(user_id, openai_msgs, config.get("metadata")))
             return self._process_messages(response["messages"])
         except GraphInterrupt:
             state = await graph.aget_state(config)
@@ -312,7 +313,7 @@ class LangGraphAgent:
                 yield str(interrupt_value)
             elif state.values and "messages" in state.values:
                 openai_msgs = cast(list[dict], convert_to_openai_messages(state.values["messages"]))
-                spawn_background_task(memory_service.add(user_id, openai_msgs, config.get("metadata")))
+                spawn_background_task(self.memory_service.add(user_id, openai_msgs, config.get("metadata")))
         except GraphInterrupt:
             state = await graph.aget_state(config)
             interrupt_value = state.tasks[0].interrupts[0].value if state.tasks else "Waiting for input."

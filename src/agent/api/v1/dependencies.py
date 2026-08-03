@@ -3,6 +3,7 @@
 from fastapi import (
     Depends,
     HTTPException,
+    Request,
 )
 from fastapi.security import (
     HTTPAuthorizationCredentials,
@@ -18,8 +19,6 @@ from agent.models.user import User
 from agent.repositories import (
     SessionRepository,
     UserRepository,
-    session_repository,
-    user_repository,
 )
 from agent.utils.auth import verify_token
 from agent.utils.sanitization import sanitize_string
@@ -27,14 +26,14 @@ from agent.utils.sanitization import sanitize_string
 security = HTTPBearer()
 
 
-def get_user_repository() -> UserRepository:
+def get_user_repository(request: Request) -> UserRepository:
     """Provide the shared user repository."""
-    return user_repository
+    return UserRepository(request.app.state.database.session_maker)
 
 
-def get_session_repository() -> SessionRepository:
+def get_session_repository(request: Request) -> SessionRepository:
     """Provide the shared session repository."""
-    return session_repository
+    return SessionRepository(request.app.state.database.session_maker)
 
 
 async def get_current_user(

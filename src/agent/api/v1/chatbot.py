@@ -10,13 +10,17 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 
-from agent.api.v1.dependencies import get_current_session
+from agent.api.v1.dependencies import (
+    get_current_session,
+    get_session_repository,
+)
 from agent.core.config import settings
 from agent.core.langgraph.graph import LangGraphAgent
 from agent.core.limiter import limiter
 from agent.core.logging import logger
 from agent.core.metrics import llm_stream_duration_seconds
 from agent.models.session import Session
+from agent.repositories import SessionRepository
 from agent.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -39,6 +43,7 @@ async def chat(
     chat_request: ChatRequest,
     session: Session = Depends(get_current_session),
     agent: LangGraphAgent = Depends(get_agent),
+    session_repo: SessionRepository = Depends(get_session_repository),
 ):
     """Process a chat request using LangGraph."""
     logger.info(
@@ -48,7 +53,7 @@ async def chat(
     )
 
     if settings.llm.session_naming_enabled:
-        await maybe_name_session(agent.llm_service, session.id, session.name, chat_request.messages)
+        await maybe_name_session(agent.llm_service, session_repo, session.id, session.name, chat_request.messages)
 
     result = await agent.get_response(
         chat_request.messages, session.id, user_id=str(session.user_id), username=session.username
@@ -66,6 +71,7 @@ async def chat_stream(
     chat_request: ChatRequest,
     session: Session = Depends(get_current_session),
     agent: LangGraphAgent = Depends(get_agent),
+    session_repo: SessionRepository = Depends(get_session_repository),
 ):
     """Process a chat request using LangGraph with streaming response."""
     logger.info(
@@ -75,7 +81,7 @@ async def chat_stream(
     )
 
     if settings.llm.session_naming_enabled:
-        await maybe_name_session(agent.llm_service, session.id, session.name, chat_request.messages)
+        await maybe_name_session(agent.llm_service, session_repo, session.id, session.name, chat_request.messages)
 
     async def event_generator():
         try:

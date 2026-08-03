@@ -213,7 +213,7 @@ class ValkeyCacheService:
             logger.info("cache_connection_closed")
 
 
-def _create_cache_service() -> CacheService:
+def create_cache_service() -> CacheService:
     """Create the appropriate cache service based on configuration.
 
     Returns:
@@ -246,7 +246,3 @@ def cache_key(prefix: str, *parts: str) -> str:
     raw = ":".join(parts)
     hashed = hashlib.sha256(raw.encode()).hexdigest()[:16]
     return f"{prefix}:{hashed}"
-
-
-# Global cache service singleton — initialized lazily in lifespan
-cache_service = _create_cache_service()
