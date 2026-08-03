@@ -21,12 +21,11 @@ from asgi_correlation_id import (
 )
 
 from agent.api.v1.api import api_router
-from agent.core.cache import create_cache_service
+from agent.container import AppContainer
 from agent.core.config import (
     Environment,
     settings,
 )
-from agent.core.langgraph.graph import LangGraphAgent
 from agent.core.limiter import limiter
 from agent.core.logging import logger
 from agent.core.metrics import setup_metrics
@@ -36,9 +35,6 @@ from agent.core.middleware import (
     ProfilingMiddleware,
 )
 from agent.core.observability import langfuse_init
-from agent.services.database import Database
-from agent.services.llm import LLMService
-from agent.services.memory import MemoryService
 
 langfuse_init()
 
@@ -53,37 +49,13 @@ async def lifespan(app: FastAPI):
         api_prefix=settings.app.api_v1_str,
     )
 
-    database = Database()
-    app.state.database = database
-
-    cache_service = create_cache_service()
-    try:
-        await cache_service.initialize()
-    except Exception as e:
-        logger.exception("cache_initialization_failed", error=str(e))
-
-    memory_service = MemoryService(cache_service)
-    llm_service = LLMService()
-    agent = LangGraphAgent(llm_service, memory_service)
-
-    try:
-        await agent.create_graph()
-        logger.info("graph_pre_warmed")
-    except Exception as e:
-        logger.exception("graph_pre_warm_failed", error=str(e))
-
-    app.state.agent = agent
-
-    try:
-        await memory_service.initialize()
-    except Exception as e:
-        logger.exception("memory_service_pre_warm_failed", error=str(e))
+    container = AppContainer()
+    app.state.container = container
+    await container.startup()
 
     yield
 
-    await agent.close()
-    await cache_service.close()
-    await database.dispose()
+    await container.shutdown()
     logger.info("application_shutdown")
 
 
@@ -196,7 +168,7 @@ async def health_check(request: Request) -> JSONResponse:
     """Health check endpoint with database connectivity status."""
     logger.info("health_check_called")
 
-    db_healthy = await request.app.state.database.health_check()
+    db_healthy = await request.app.state.container.database.health_check()
 
     response = {
         "status": "healthy" if db_healthy else "degraded",

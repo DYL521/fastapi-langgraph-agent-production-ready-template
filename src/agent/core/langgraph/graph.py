@@ -7,7 +7,6 @@ from typing import (
     cast,
 )
 
-from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -42,7 +41,6 @@ from agent.core.db import (
 from agent.core.langgraph.tools import tools
 from agent.core.logging import logger
 from agent.core.metrics import llm_inference_duration_seconds
-from agent.core.observability import langfuse_callback_handler
 from agent.core.prompts import load_system_prompt
 from agent.schemas import (
     GraphState,
@@ -61,10 +59,16 @@ from agent.utils import (
 class LangGraphAgent:
     """Manages the LangGraph Agent/workflow and interactions with the LLM."""
 
-    def __init__(self, llm_service: LLMService, memory_service: MemoryService):
+    def __init__(
+        self,
+        llm_service: LLMService,
+        memory_service: MemoryService,
+        langfuse_handler: Any = None,
+    ):
         """Initialize the LangGraph Agent with necessary components."""
         self.llm_service = llm_service
         self.memory_service = memory_service
+        self._langfuse_handler = langfuse_handler
         self.llm_service.bind_tools(tools)
         self.tools_by_name = {tool.name: tool for tool in tools}
         self._connection_pool: Any | None = None
@@ -81,7 +85,7 @@ class LangGraphAgent:
         user_id: str | None = None,
         username: str | None = None,
     ) -> RunnableConfig:
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.langfuse.tracing_enabled else []
+        callbacks = [self._langfuse_handler] if settings.langfuse.tracing_enabled and self._langfuse_handler else []
         return {
             "configurable": {"thread_id": session_id},
             "callbacks": callbacks,

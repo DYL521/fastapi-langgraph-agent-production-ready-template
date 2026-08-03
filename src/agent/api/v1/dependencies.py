@@ -1,4 +1,8 @@
-"""Shared FastAPI dependencies: auth resolution and repository injection."""
+"""Shared FastAPI dependencies: auth resolution and service injection.
+
+All services are resolved from the ``AppContainer`` stored on
+``request.app.state.container``.
+"""
 
 from fastapi import (
     Depends,
@@ -10,6 +14,8 @@ from fastapi.security import (
     HTTPBearer,
 )
 
+from agent.container import AppContainer
+from agent.core.langgraph.graph import LangGraphAgent
 from agent.core.logging import (
     bind_context,
     logger,
@@ -26,14 +32,24 @@ from agent.utils.sanitization import sanitize_string
 security = HTTPBearer()
 
 
-def get_user_repository(request: Request) -> UserRepository:
+def get_container(request: Request) -> AppContainer:
+    """Resolve the app-scoped service container."""
+    return request.app.state.container
+
+
+def get_user_repository(container: AppContainer = Depends(get_container)) -> UserRepository:
     """Provide the shared user repository."""
-    return UserRepository(request.app.state.database.session_maker)
+    return UserRepository(container.database.session_maker)
 
 
-def get_session_repository(request: Request) -> SessionRepository:
+def get_session_repository(container: AppContainer = Depends(get_container)) -> SessionRepository:
     """Provide the shared session repository."""
-    return SessionRepository(request.app.state.database.session_maker)
+    return SessionRepository(container.database.session_maker)
+
+
+def get_agent(container: AppContainer = Depends(get_container)) -> LangGraphAgent:
+    """Resolve the LangGraphAgent from the container."""
+    return container.agent
 
 
 async def get_current_user(

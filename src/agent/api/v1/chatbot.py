@@ -11,6 +11,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 
 from agent.api.v1.dependencies import (
+    get_agent,
     get_current_session,
     get_session_repository,
 )
@@ -29,11 +30,6 @@ from agent.schemas.chat import (
 from agent.services.session_naming import maybe_name_session
 
 router = APIRouter()
-
-
-def get_agent(request: Request) -> LangGraphAgent:
-    """Resolve the LangGraphAgent from app state."""
-    return request.app.state.agent
 
 
 @router.post("/chat", response_model=ChatResponse)
