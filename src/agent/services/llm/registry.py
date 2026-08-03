@@ -1,15 +1,6 @@
-"""LLM model registry — config-driven, provider-agnostic.
+"""LLM model registry — config-driven, provider-agnostic."""
 
-The model list comes from ``settings.llm.model_chain`` (primary model plus any
-``LLM_FALLBACK_MODELS``), and instances are built through the active provider's
-adapter (``build_chat_model``). No model names or provider classes are hardcoded.
-"""
-
-from typing import (
-    Any,
-    Dict,
-    List,
-)
+from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -18,7 +9,7 @@ from agent.core.logging import logger
 from agent.services.llm.providers import build_chat_model
 
 
-def _build_registry() -> List[Dict[str, Any]]:
+def _build_registry() -> list[dict[str, Any]]:
     """Build the registry entries from the configured model chain."""
     return [{"name": name, "llm": build_chat_model(name)} for name in settings.llm.model_chain]
 
@@ -26,25 +17,11 @@ def _build_registry() -> List[Dict[str, Any]]:
 class LLMRegistry:
     """Registry of available LLM models with pre-initialized instances."""
 
-    LLMS: List[Dict[str, Any]] = _build_registry()
+    LLMS: list[dict[str, Any]] = _build_registry()
 
     @classmethod
     def get(cls, model_name: str, **kwargs) -> BaseChatModel:
-        """Get an LLM by name, optionally with per-call overrides.
-
-        When kwargs are provided a fresh instance is built with those overrides,
-        leaving the shared registry entry untouched.
-
-        Args:
-            model_name: Name of the model to retrieve.
-            **kwargs: Optional provider-agnostic overrides.
-
-        Returns:
-            BaseChatModel instance.
-
-        Raises:
-            ValueError: If model_name is not in the configured chain.
-        """
+        """Get an LLM by name, optionally with per-call overrides."""
         model_entry = next((e for e in cls.LLMS if e["name"] == model_name), None)
         if not model_entry:
             available = ", ".join(e["name"] for e in cls.LLMS)
@@ -58,12 +35,12 @@ class LLMRegistry:
         return model_entry["llm"]
 
     @classmethod
-    def get_all_names(cls) -> List[str]:
+    def get_all_names(cls) -> list[str]:
         """Return all registered model names in order."""
         return [e["name"] for e in cls.LLMS]
 
     @classmethod
-    def get_model_at_index(cls, index: int) -> Dict[str, Any]:
+    def get_model_at_index(cls, index: int) -> dict[str, Any]:
         """Return the model entry at an index, wrapping to 0 if out of range."""
         if 0 <= index < len(cls.LLMS):
             return cls.LLMS[index]

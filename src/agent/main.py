@@ -3,7 +3,6 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from dotenv import load_dotenv
 from fastapi import (
     FastAPI,
     Request,
@@ -22,8 +21,7 @@ from asgi_correlation_id import (
 )
 
 from agent.api.v1.api import api_router
-from agent.api.v1.chatbot import agent
-from agent.core.cache import cache_service
+from agent.container import AppContainer
 from agent.core.config import (
     Environment,
     settings,
@@ -37,11 +35,7 @@ from agent.core.middleware import (
     ProfilingMiddleware,
 )
 from agent.core.observability import langfuse_init
-from agent.services.database import database
-from agent.services.memory import memory_service
 
-# Load environment variables
-load_dotenv()
 langfuse_init()
 
 
@@ -55,35 +49,13 @@ async def lifespan(app: FastAPI):
         api_prefix=settings.app.api_v1_str,
     )
 
-    # Initialize cache service (connects to Valkey if configured)
-    try:
-        await cache_service.initialize()
-    except Exception as e:
-        logger.exception("cache_initialization_failed", error=str(e))
-
-    # Pre-warm the LangGraph agent: create graph + connection pool at startup
-    # to avoid cold-start latency on the first request
-    try:
-        await agent.create_graph()
-        logger.info("graph_pre_warmed")
-    except Exception as e:
-        logger.exception("graph_pre_warm_failed", error=str(e))
-
-    # Pre-warm mem0 AsyncMemory: initializes pgvector connection and schema check
-    # so the first search() cache miss or add() doesn't pay the ~130ms cold-init cost
-    try:
-        await memory_service.initialize()
-    except Exception as e:
-        logger.exception("memory_service_pre_warm_failed", error=str(e))
+    container = AppContainer()
+    app.state.container = container
+    await container.startup()
 
     yield
 
-    # Cleanup on shutdown
-    await cache_service.close()
-    if agent._connection_pool:
-        await agent._connection_pool.close()
-        logger.info("connection_pool_closed")
-    await database.dispose()
+    await container.shutdown()
     logger.info("application_shutdown")
 
 
@@ -95,30 +67,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Set up Prometheus metrics
 setup_metrics(app)
 
-# Add logging context middleware (must be added before other middleware to capture context)
 app.add_middleware(LoggingContextMiddleware)
-
-# Add custom metrics middleware
 app.add_middleware(MetricsMiddleware)
 
-# Add profiling middleware (DEBUG only — saves HTML to /tmp on slow requests)
 if settings.app.debug:
     app.add_middleware(ProfilingMiddleware)
 
-# Add correlation ID middleware — must be outermost so request_id is set before all others
 app.add_middleware(CorrelationIdMiddleware)
 
-# Set up rate limiter exception handler
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # pyright: ignore[reportArgumentType]
 
 
-# ---------------------------------------------------------------------------
-# Unified error envelope: {error:{code,message,details}, meta:{request_id}}
-# ---------------------------------------------------------------------------
 _STATUS_CODE_NAMES = {
     400: "BAD_REQUEST",
     401: "UNAUTHORIZED",
@@ -166,14 +128,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    """Catch-all: log the traceback, return a generic 500 (no internal details leaked)."""
+    """Catch-all: log the traceback, return a generic 500."""
     logger.exception("unhandled_exception", path=request.url.path)
     return _error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Internal server error")
 
 
-# Set up CORS middleware.
-# A wildcard origin is incompatible with credentialed requests (browsers reject
-# `Access-Control-Allow-Origin: *` with credentials) and is unsafe in production.
 _wildcard_cors = "*" in settings.app.allowed_origins
 if _wildcard_cors and settings.app.environment == Environment.PRODUCTION:
     logger.warning("insecure_cors_wildcard_in_production", origins=settings.app.allowed_origins)
@@ -185,7 +144,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API router
 app.include_router(api_router, prefix=settings.app.api_v1_str)
 
 
@@ -207,16 +165,10 @@ async def root(request: Request):
 @app.get("/health")
 @limiter.limit(settings.rate_limit.endpoints["health"][0])
 async def health_check(request: Request) -> JSONResponse:
-    """Health check endpoint with environment-specific information.
-
-    Returns:
-        JSONResponse: Health status payload, with HTTP 503 when the
-        database is unreachable so load balancers can drop the instance.
-    """
+    """Health check endpoint with database connectivity status."""
     logger.info("health_check_called")
 
-    # Check database connectivity
-    db_healthy = await database.health_check()
+    db_healthy = await request.app.state.container.database.health_check()
 
     response = {
         "status": "healthy" if db_healthy else "degraded",
@@ -226,7 +178,6 @@ async def health_check(request: Request) -> JSONResponse:
         "timestamp": datetime.now().isoformat(),
     }
 
-    # If DB is unhealthy, set the appropriate status code
     status_code = status.HTTP_200_OK if db_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(content=response, status_code=status_code)

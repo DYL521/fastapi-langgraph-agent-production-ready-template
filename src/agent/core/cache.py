@@ -10,12 +10,38 @@ from collections import OrderedDict
 from typing import (
     TYPE_CHECKING,
     Awaitable,
-    Optional,
+    Protocol,
     cast,
+    runtime_checkable,
 )
 
 from agent.core.config import settings
 from agent.core.logging import logger
+
+
+@runtime_checkable
+class CacheService(Protocol):
+    """Protocol for cache service implementations."""
+
+    async def initialize(self) -> None:
+        """Connect to the cache backend."""
+        ...
+
+    async def get(self, key: str) -> str | None:
+        """Get a value by key, or None if missing/expired."""
+        ...
+
+    async def set(self, key: str, value: str, ttl: int | None = None) -> None:
+        """Store a value with optional TTL in seconds."""
+        ...
+
+    async def delete(self, key: str) -> None:
+        """Remove a key from the cache."""
+        ...
+
+    async def close(self) -> None:
+        """Release cache resources."""
+        ...
 
 # Try to import redis — it's an optional dependency
 if TYPE_CHECKING:
@@ -55,7 +81,7 @@ class InMemoryCacheService:
         """No-op for in-memory cache."""
         logger.info("cache_initialized", backend="in_memory", ttl=self._default_ttl, max_size=self._max_size)
 
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str) -> str | None:
         """Get a value from cache.
 
         Args:
@@ -75,7 +101,7 @@ class InMemoryCacheService:
         self._cache.move_to_end(key)
         return value
 
-    async def set(self, key: str, value: str, ttl: Optional[int] = None) -> None:
+    async def set(self, key: str, value: str, ttl: int | None = None) -> None:
         """Set a value in cache with TTL.
 
         Args:
@@ -112,7 +138,7 @@ class ValkeyCacheService:
         Args:
             default_ttl: Default time-to-live in seconds for cache entries.
         """
-        self._client: Optional[Redis] = None
+        self._client: Redis | None = None
         self._default_ttl = default_ttl
 
     async def initialize(self) -> None:
@@ -135,7 +161,7 @@ class ValkeyCacheService:
             ttl=self._default_ttl,
         )
 
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str) -> str | None:
         """Get a value from Valkey.
 
         Args:
@@ -152,7 +178,7 @@ class ValkeyCacheService:
             logger.warning("cache_get_failed", key=key, error=str(e))
             return None
 
-    async def set(self, key: str, value: str, ttl: Optional[int] = None) -> None:
+    async def set(self, key: str, value: str, ttl: int | None = None) -> None:
         """Set a value in Valkey with TTL.
 
         Args:
@@ -187,7 +213,7 @@ class ValkeyCacheService:
             logger.info("cache_connection_closed")
 
 
-def _create_cache_service() -> InMemoryCacheService | ValkeyCacheService:
+def create_cache_service() -> CacheService:
     """Create the appropriate cache service based on configuration.
 
     Returns:
@@ -220,7 +246,3 @@ def cache_key(prefix: str, *parts: str) -> str:
     raw = ":".join(parts)
     hashed = hashlib.sha256(raw.encode()).hexdigest()[:16]
     return f"{prefix}:{hashed}"
-
-
-# Global cache service singleton — initialized lazily in lifespan
-cache_service = _create_cache_service()

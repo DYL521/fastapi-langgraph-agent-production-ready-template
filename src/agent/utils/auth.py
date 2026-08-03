@@ -6,8 +6,6 @@ from datetime import (
     datetime,
     timedelta,
 )
-from typing import Optional
-
 from jose import (
     JWTError,
     jwt,
@@ -19,7 +17,7 @@ from agent.schemas.auth import Token
 from agent.utils.sanitization import sanitize_string
 
 
-def create_access_token(thread_id: str, expires_delta: Optional[timedelta] = None) -> Token:
+def create_access_token(thread_id: str, expires_delta: timedelta | None = None) -> Token:
     """Create a new access token for a thread.
 
     Args:
@@ -48,7 +46,7 @@ def create_access_token(thread_id: str, expires_delta: Optional[timedelta] = Non
     return Token(access_token=encoded_jwt, expires_at=expire)
 
 
-def verify_token(token: str) -> Optional[str]:
+def verify_token(token: str) -> str | None:
     """Verify a JWT token and return the thread ID.
 
     Args:

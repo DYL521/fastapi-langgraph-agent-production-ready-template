@@ -1,9 +1,6 @@
 """This file contains the session model for the application."""
 
-from typing import (
-    TYPE_CHECKING,
-    Optional,
-)
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Index
 from sqlmodel import (
@@ -37,5 +34,5 @@ class Session(BaseModel, table=True):
     id: str = Field(primary_key=True)
     user_id: int = Field(foreign_key="user.id")
     name: str = Field(default="")
-    username: Optional[str] = Field(default=None)
+    username: str | None = Field(default=None)
     user: "User" = Relationship(back_populates="sessions")

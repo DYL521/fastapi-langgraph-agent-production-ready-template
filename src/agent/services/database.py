@@ -64,7 +64,3 @@ class Database:
         """Dispose of the engine's connection pool (call on shutdown)."""
         await self.engine.dispose()
         logger.info("database_disposed")
-
-
-# Singleton instance — owns the shared async engine/connection pool.
-database = Database()

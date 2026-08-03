@@ -3,8 +3,8 @@
 from mem0 import AsyncMemory
 
 from agent.core.cache import (
+    CacheService,
     cache_key,
-    cache_service,
 )
 from agent.core.config import settings
 from agent.core.db import get_vector_store_config
@@ -14,9 +14,10 @@ from agent.core.logging import logger
 class MemoryService:
     """Service for managing long-term memory using mem0 and a configurable vector store."""
 
-    def __init__(self):
-        """Initialize the memory service."""
+    def __init__(self, cache: CacheService):
+        """Initialize the memory service with a cache backend."""
         self._memory: AsyncMemory | None = None
+        self._cache = cache
 
     async def _get_memory(self) -> AsyncMemory:
         if self._memory is None:
@@ -56,9 +57,8 @@ class MemoryService:
         if user_id is None:
             return ""
         try:
-            # Check cache first
             key = cache_key("memory", str(user_id), query)
-            cached = await cache_service.get(key)
+            cached = await self._cache.get(key)
             if cached is not None:
                 logger.debug("memory_search_cache_hit", user_id=user_id)
                 return cached
@@ -67,9 +67,8 @@ class MemoryService:
             results = await memory.search(user_id=str(user_id), query=query)
             result = "\n".join([f"* {r['memory']}" for r in results["results"]])
 
-            # Cache successful results
             if result:
-                await cache_service.set(key, result)
+                await self._cache.set(key, result)
 
             return result
         except Exception:
@@ -89,6 +88,3 @@ class MemoryService:
             logger.info("long_term_memory_updated_successfully", user_id=user_id)
         except Exception as e:
             logger.exception("failed_to_update_long_term_memory", user_id=user_id, error=str(e))
-
-
-memory_service = MemoryService()

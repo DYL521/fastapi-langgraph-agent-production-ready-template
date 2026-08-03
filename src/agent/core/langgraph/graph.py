@@ -4,11 +4,9 @@ import asyncio
 from typing import (
     Any,
     AsyncGenerator,
-    Optional,
     cast,
 )
 
-from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -43,14 +41,13 @@ from agent.core.db import (
 from agent.core.langgraph.tools import tools
 from agent.core.logging import logger
 from agent.core.metrics import llm_inference_duration_seconds
-from agent.core.observability import langfuse_callback_handler
 from agent.core.prompts import load_system_prompt
 from agent.schemas import (
     GraphState,
     Message,
 )
-from agent.services.llm import llm_service
-from agent.services.memory import memory_service
+from agent.services.llm import LLMService
+from agent.services.memory import MemoryService
 from agent.utils import (
     dump_messages,
     extract_text_content,
@@ -60,35 +57,67 @@ from agent.utils import (
 )
 
 class LangGraphAgent:
-    """Manages the LangGraph Agent/workflow and interactions with the LLM.
+    """Manages the LangGraph Agent/workflow and interactions with the LLM."""
 
-    This class handles the creation and management of the LangGraph workflow,
-    including LLM interactions, database connections, and response processing.
-    """
-
-    def __init__(self):
+    def __init__(
+        self,
+        llm_service: LLMService,
+        memory_service: MemoryService,
+        langfuse_handler: Any = None,
+    ):
         """Initialize the LangGraph Agent with necessary components."""
-        # Use the LLM service with tools bound
         self.llm_service = llm_service
+        self.memory_service = memory_service
+        self._langfuse_handler = langfuse_handler
         self.llm_service.bind_tools(tools)
         self.tools_by_name = {tool.name: tool for tool in tools}
-        # Pool type depends on the active DB dialect (psycopg or aiomysql), so Any.
-        self._connection_pool: Optional[Any] = None
-        self._graph: Optional[CompiledStateGraph] = None
+        self._connection_pool: Any | None = None
+        self._graph: CompiledStateGraph | None = None
         logger.info(
             "langgraph_agent_initialized",
             model=settings.llm.model,
             environment=settings.app.environment.value,
         )
 
-    async def _get_connection_pool(self) -> Optional[Any]:
-        """Get the checkpointer connection pool for the configured DB dialect.
+    def _build_config(
+        self,
+        session_id: str,
+        user_id: str | None = None,
+        username: str | None = None,
+    ) -> RunnableConfig:
+        callbacks = [self._langfuse_handler] if settings.langfuse.tracing_enabled and self._langfuse_handler else []
+        return {
+            "configurable": {"thread_id": session_id},
+            "callbacks": callbacks,
+            "metadata": {
+                "user_id": user_id,
+                "username": username,
+                "session_id": session_id,
+                "environment": settings.app.environment.value,
+                "debug": settings.app.debug,
+            },
+        }
 
-        Returns:
-            An open connection pool (psycopg or aiomysql), or None when the pool
-            fails to initialise in production (the app keeps running in a
-            degraded mode).
-        """
+    async def _prepare_input(
+        self,
+        graph: CompiledStateGraph,
+        config: RunnableConfig,
+        messages: list[Message],
+        user_id: str | None,
+    ) -> tuple[StateSnapshot, Any]:
+        """Run state check and memory search concurrently, return (state, graph_input)."""
+        state, relevant_memory = await asyncio.gather(
+            graph.aget_state(config),
+            self.memory_service.search(user_id, messages[-1].content),
+        )
+
+        if state.next:
+            return state, Command(resume=messages[-1].content)
+
+        relevant_memory = relevant_memory or "No relevant memory found."
+        return state, {"messages": dump_messages(messages), "long_term_memory": relevant_memory}
+
+    async def _get_connection_pool(self) -> Any | None:
         if self._connection_pool is None:
             try:
                 self._connection_pool = await create_checkpointer_pool()
@@ -100,7 +129,6 @@ class LangGraphAgent:
                 )
             except Exception as e:
                 logger.exception("connection_pool_creation_failed", environment=settings.app.environment.value)
-                # In production, we might want to degrade gracefully
                 if settings.app.environment == Environment.PRODUCTION:
                     logger.warning("continuing_without_connection_pool", environment=settings.app.environment.value)
                     return None
@@ -108,16 +136,6 @@ class LangGraphAgent:
         return self._connection_pool
 
     async def _chat(self, state: GraphState, config: RunnableConfig) -> Command:
-        """Process the chat state and generate a response.
-
-        Args:
-            state (GraphState): The current state of the conversation.
-            config (RunnableConfig): The runnable configuration for this invocation.
-
-        Returns:
-            Command: Command object with updated state and next node to execute.
-        """
-        # Get the current LLM instance for metrics
         current_llm = self.llm_service.get_llm()
         model_name = (
             current_llm.model_name
@@ -129,15 +147,12 @@ class LangGraphAgent:
         thread_id = config.get("configurable", {}).get("thread_id")
         SYSTEM_PROMPT = load_system_prompt(username=username, long_term_memory=state.long_term_memory)
 
-        # Prepare messages with system prompt
         messages = prepare_messages(state.messages, SYSTEM_PROMPT)
 
         try:
-            # Use LLM service with automatic retries and circular fallback
             with llm_inference_duration_seconds.labels(model=model_name).time():
                 response_message = await self.llm_service.call(dump_messages(messages))
 
-            # Process response to handle structured content blocks
             response_message = process_llm_response(response_message)
 
             logger.info(
@@ -147,31 +162,21 @@ class LangGraphAgent:
                 environment=settings.app.environment.value,
             )
 
-            # Determine next node based on whether there are tool calls
             if isinstance(response_message, AIMessage) and response_message.tool_calls:
                 goto = "tool_call"
             else:
                 goto = END
 
             return Command(update={"messages": [response_message]}, goto=goto)
-        except Exception as e:
+        except Exception:
             logger.exception(
                 "llm_call_failed_all_models",
                 session_id=thread_id,
                 environment=settings.app.environment.value,
             )
-            raise Exception(f"failed to get llm response after trying all models: {str(e)}")
+            raise
 
-    # Define our tool node
     async def _tool_call(self, state: GraphState) -> Command:
-        """Process tool calls from the last message.
-
-        Args:
-            state: The current agent state containing messages and tool calls.
-
-        Returns:
-            Command: Command object with updated messages and routing back to chat.
-        """
         tool_calls = state.messages[-1].tool_calls
 
         async def _execute_tool(tool_call: dict) -> ToolMessage:
@@ -182,7 +187,6 @@ class LangGraphAgent:
                 tool_call_id=tool_call["id"],
             )
 
-        # Execute tool calls concurrently when multiple are requested
         if len(tool_calls) == 1:
             outputs = [await _execute_tool(tool_calls[0])]
         else:
@@ -190,12 +194,8 @@ class LangGraphAgent:
 
         return Command(update={"messages": outputs}, goto="chat")
 
-    async def create_graph(self) -> Optional[CompiledStateGraph]:
-        """Create and configure the LangGraph workflow.
-
-        Returns:
-            Optional[CompiledStateGraph]: The configured LangGraph instance or None if init fails
-        """
+    async def create_graph(self) -> CompiledStateGraph | None:
+        """Create and configure the LangGraph workflow."""
         if self._graph is None:
             try:
                 graph_builder = StateGraph(GraphState)
@@ -209,13 +209,11 @@ class LangGraphAgent:
                 graph_builder.set_entry_point("chat")
                 graph_builder.set_finish_point("chat")
 
-                # Get connection pool (may be None in production if DB unavailable)
                 connection_pool = await self._get_connection_pool()
                 if connection_pool:
                     checkpointer = create_checkpointer(connection_pool)
                     await checkpointer.setup()
                 else:
-                    # In production, proceed without checkpointer if needed
                     checkpointer = None
                     if settings.app.environment != Environment.PRODUCTION:
                         raise Exception("Connection pool initialization failed")
@@ -232,7 +230,6 @@ class LangGraphAgent:
                 )
             except Exception as e:
                 logger.exception("graph_creation_failed", environment=settings.app.environment.value)
-                # In production, we don't want to crash the app
                 if settings.app.environment == Environment.PRODUCTION:
                     logger.warning("continuing_without_graph")
                     return None
@@ -241,13 +238,6 @@ class LangGraphAgent:
         return self._graph
 
     async def _get_graph(self) -> CompiledStateGraph:
-        """Return the compiled graph, creating it on first access.
-
-        Raises:
-            RuntimeError: When ``create_graph()`` swallowed an init failure
-                (production-only path) and returned ``None``. Callers can
-                rely on the return being non-``None``.
-        """
         if self._graph is None:
             self._graph = await self.create_graph()
         if self._graph is None:
@@ -258,55 +248,21 @@ class LangGraphAgent:
         self,
         messages: list[Message],
         session_id: str,
-        user_id: Optional[str] = None,
-        username: Optional[str] = None,
+        user_id: str | None = None,
+        username: str | None = None,
     ) -> list[Message]:
-        """Get a response from the LLM.
-
-        Args:
-            messages (list[Message]): The messages to send to the LLM.
-            session_id (str): The session ID for the conversation.
-            user_id (Optional[str]): The user ID for the conversation.
-            username (Optional[str]): The display name of the user.
-
-        Returns:
-            list[Message]: The response from the LLM.
-        """
+        """Get a non-streaming response from the LLM."""
         graph = await self._get_graph()
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.langfuse.tracing_enabled else []
-        config: RunnableConfig = {
-            "configurable": {"thread_id": session_id},
-            "callbacks": callbacks,
-            "metadata": {
-                "user_id": user_id,
-                "username": username,
-                "session_id": session_id,
-                "environment": settings.app.environment.value,
-                "debug": settings.app.debug,
-            },
-        }
+        config = self._build_config(session_id, user_id, username)
 
         try:
-            # Run state check and memory search concurrently to save 200-500ms
-            state, relevant_memory = await asyncio.gather(
-                graph.aget_state(config),
-                memory_service.search(user_id, messages[-1].content),
-            )
+            state, graph_input = await self._prepare_input(graph, config, messages, user_id)
 
             if state.next:
                 logger.info("resuming_interrupted_graph", session_id=session_id, next_nodes=state.next)
-                response = await graph.ainvoke(
-                    Command(resume=messages[-1].content),
-                    config=config,
-                )
-            else:
-                relevant_memory = relevant_memory or "No relevant memory found."
-                response = await graph.ainvoke(
-                    input={"messages": dump_messages(messages), "long_term_memory": relevant_memory},
-                    config=config,
-                )
 
-            # Check if the graph was interrupted during this invocation
+            response = await graph.ainvoke(graph_input, config=config)
+
             state = await graph.aget_state(config)
             if state.next:
                 interrupt_value = state.tasks[0].interrupts[0].value if state.tasks else "Waiting for input."
@@ -314,8 +270,8 @@ class LangGraphAgent:
                 return [Message(role="assistant", content=str(interrupt_value))]
 
             openai_msgs = cast(list[dict], convert_to_openai_messages(response["messages"]))
-            spawn_background_task(memory_service.add(user_id, openai_msgs, config.get("metadata")))
-            return self.__process_messages(response["messages"])
+            spawn_background_task(self.memory_service.add(user_id, openai_msgs, config.get("metadata")))
+            return self._process_messages(response["messages"])
         except GraphInterrupt:
             state = await graph.aget_state(config)
             interrupt_value = state.tasks[0].interrupts[0].value if state.tasks else "Waiting for input."
@@ -329,47 +285,18 @@ class LangGraphAgent:
         self,
         messages: list[Message],
         session_id: str,
-        user_id: Optional[str] = None,
-        username: Optional[str] = None,
+        user_id: str | None = None,
+        username: str | None = None,
     ) -> AsyncGenerator[str, None]:
-        """Get a stream response from the LLM.
-
-        Args:
-            messages (list[Message]): The messages to send to the LLM.
-            session_id (str): The session ID for the conversation.
-            user_id (Optional[str]): The user ID for the conversation.
-            username (Optional[str]): The display name of the user.
-
-        Yields:
-            str: Tokens of the LLM response.
-        """
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.langfuse.tracing_enabled else []
-        config: RunnableConfig = {
-            "configurable": {"thread_id": session_id},
-            "callbacks": callbacks,
-            "metadata": {
-                "user_id": user_id,
-                "username": username,
-                "session_id": session_id,
-                "environment": settings.app.environment.value,
-                "debug": settings.app.debug,
-            },
-        }
+        """Get a streaming response from the LLM, yielding text chunks."""
+        config = self._build_config(session_id, user_id, username)
         graph = await self._get_graph()
 
         try:
-            # Run state check and memory search concurrently to save 200-500ms
-            state, relevant_memory = await asyncio.gather(
-                graph.aget_state(config),
-                memory_service.search(user_id, messages[-1].content),
-            )
+            state, graph_input = await self._prepare_input(graph, config, messages, user_id)
 
             if state.next:
                 logger.info("resuming_interrupted_graph_stream", session_id=session_id, next_nodes=state.next)
-                graph_input = Command(resume=messages[-1].content)
-            else:
-                relevant_memory = relevant_memory or "No relevant memory found."
-                graph_input = {"messages": dump_messages(messages), "long_term_memory": relevant_memory}
 
             async for token, _ in graph.astream(
                 graph_input,
@@ -383,7 +310,6 @@ class LangGraphAgent:
                 if text:
                     yield text
 
-            # After streaming completes, check for interrupt or update memory
             state = await graph.aget_state(config)
             if state.next:
                 interrupt_value = state.tasks[0].interrupts[0].value if state.tasks else "Waiting for input."
@@ -391,7 +317,7 @@ class LangGraphAgent:
                 yield str(interrupt_value)
             elif state.values and "messages" in state.values:
                 openai_msgs = cast(list[dict], convert_to_openai_messages(state.values["messages"]))
-                spawn_background_task(memory_service.add(user_id, openai_msgs, config.get("metadata")))
+                spawn_background_task(self.memory_service.add(user_id, openai_msgs, config.get("metadata")))
         except GraphInterrupt:
             state = await graph.aget_state(config)
             interrupt_value = state.tasks[0].interrupts[0].value if state.tasks else "Waiting for input."
@@ -401,30 +327,19 @@ class LangGraphAgent:
             logger.exception("stream_processing_failed", error=str(stream_error), session_id=session_id)
             raise stream_error
 
-    async def get_chat_history(self, session_id: str, limit: Optional[int] = None) -> list[Message]:
-        """Get the chat history for a given thread ID.
-
-        Args:
-            session_id (str): The session ID for the conversation.
-            limit (Optional[int]): If set, return only the most recent ``limit``
-                messages (the checkpointer holds the full thread in memory, so
-                this bounds the response payload rather than the read).
-
-        Returns:
-            list[Message]: The chat history.
-        """
+    async def get_chat_history(self, session_id: str, limit: int | None = None) -> list[Message]:
+        """Get the chat history for a given session."""
         graph = await self._get_graph()
 
         config: RunnableConfig = {"configurable": {"thread_id": session_id}}
         state: StateSnapshot = await graph.aget_state(config=config)
         if not state.values:
             return []
-        messages = self.__process_messages(state.values["messages"])
+        messages = self._process_messages(state.values["messages"])
         return messages[-limit:] if limit else messages
 
-    def __process_messages(self, messages: list[BaseMessage]) -> list[Message]:
+    def _process_messages(self, messages: list[BaseMessage]) -> list[Message]:
         openai_style_messages = convert_to_openai_messages(messages)
-        # keep just assistant and user messages
         return [
             Message(role=message["role"], content=str(message["content"]))
             for message in openai_style_messages
@@ -432,21 +347,12 @@ class LangGraphAgent:
         ]
 
     async def clear_chat_history(self, session_id: str) -> None:
-        """Clear all chat history for a given thread ID.
-
-        Args:
-            session_id: The ID of the session to clear history for.
-
-        Raises:
-            Exception: If there's an error clearing the chat history.
-        """
+        """Clear all chat history for a given session."""
         try:
-            # Make sure the pool is initialized in the current event loop
             conn_pool = await self._get_connection_pool()
             if conn_pool is None:
                 raise RuntimeError("connection pool unavailable; cannot clear chat history")
 
-            # Dialect-aware deletion across the checkpoint tables
             await delete_thread_checkpoints(conn_pool, session_id)
             logger.info(
                 "checkpoint_tables_cleared_for_session",
@@ -460,3 +366,10 @@ class LangGraphAgent:
                 session_id=session_id,
             )
             raise
+
+    async def close(self) -> None:
+        """Shut down the agent's resources (connection pool)."""
+        if self._connection_pool:
+            await self._connection_pool.close()
+            self._connection_pool = None
+            logger.info("connection_pool_closed")

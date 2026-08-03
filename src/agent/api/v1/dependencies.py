@@ -1,14 +1,21 @@
-"""Shared FastAPI dependencies: auth resolution and repository injection."""
+"""Shared FastAPI dependencies: auth resolution and service injection.
+
+All services are resolved from the ``AppContainer`` stored on
+``request.app.state.container``.
+"""
 
 from fastapi import (
     Depends,
     HTTPException,
+    Request,
 )
 from fastapi.security import (
     HTTPAuthorizationCredentials,
     HTTPBearer,
 )
 
+from agent.container import AppContainer
+from agent.core.langgraph.graph import LangGraphAgent
 from agent.core.logging import (
     bind_context,
     logger,
@@ -18,8 +25,6 @@ from agent.models.user import User
 from agent.repositories import (
     SessionRepository,
     UserRepository,
-    session_repository,
-    user_repository,
 )
 from agent.utils.auth import verify_token
 from agent.utils.sanitization import sanitize_string
@@ -27,14 +32,24 @@ from agent.utils.sanitization import sanitize_string
 security = HTTPBearer()
 
 
-def get_user_repository() -> UserRepository:
+def get_container(request: Request) -> AppContainer:
+    """Resolve the app-scoped service container."""
+    return request.app.state.container
+
+
+def get_user_repository(container: AppContainer = Depends(get_container)) -> UserRepository:
     """Provide the shared user repository."""
-    return user_repository
+    return UserRepository(container.database.session_maker)
 
 
-def get_session_repository() -> SessionRepository:
+def get_session_repository(container: AppContainer = Depends(get_container)) -> SessionRepository:
     """Provide the shared session repository."""
-    return session_repository
+    return SessionRepository(container.database.session_maker)
+
+
+def get_agent(container: AppContainer = Depends(get_container)) -> LangGraphAgent:
+    """Resolve the LangGraphAgent from the container."""
+    return container.agent
 
 
 async def get_current_user(
@@ -51,7 +66,7 @@ async def get_current_user(
 
         user_id = verify_token(token)
         if user_id is None:
-            logger.error("invalid_token", token_part=token[:10] + "...")
+            logger.error("invalid_token")
             raise HTTPException(
                 status_code=401,
                 detail="Invalid authentication credentials",
@@ -92,7 +107,7 @@ async def get_current_session(
 
         session_id = verify_token(token)
         if session_id is None:
-            logger.error("session_id_not_found", token_part=token[:10] + "...")
+            logger.error("invalid_session_token")
             raise HTTPException(
                 status_code=401,
                 detail="Invalid authentication credentials",

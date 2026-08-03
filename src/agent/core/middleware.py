@@ -3,20 +3,20 @@
 import json
 import time
 import tracemalloc
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-    override,
-)
+from typing import TYPE_CHECKING
 
 from asgi_correlation_id import correlation_id
-from fastapi import Request
 from jose import (
     JWTError,
     jwt,
 )
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.types import (
+    ASGIApp,
+    Message,
+    Receive,
+    Scope,
+    Send,
+)
 
 from agent.core.config import settings
 from agent.core.logging import (
@@ -46,119 +46,101 @@ else:
         PYINSTRUMENT_AVAILABLE = False
 
 
-class MetricsMiddleware(BaseHTTPMiddleware):
-    """Middleware for tracking HTTP request metrics."""
+class MetricsMiddleware:
+    """Pure ASGI middleware for tracking HTTP request metrics.
 
-    @override
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """Track metrics for each request.
+    Avoids BaseHTTPMiddleware overhead — no request body buffering, no
+    StreamingResponse backpressure issues.
+    """
 
-        Args:
-            request: The incoming request
-            call_next: The next middleware or route handler
+    def __init__(self, app: ASGIApp):
+        """Wrap an ASGI application."""
+        self.app = app
 
-        Returns:
-            Response: The response from the application
-        """
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Track request count and duration for HTTP requests."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         start_time = time.time()
         status_code = 500
 
+        async def send_wrapper(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
+
         try:
-            response = await call_next(request)
-            status_code = response.status_code
-        except Exception:
-            raise
+            await self.app(scope, receive, send_wrapper)
         finally:
             duration = time.time() - start_time
-
-            # Record metrics
-            http_requests_total.labels(method=request.method, endpoint=request.url.path, status=status_code).inc()
-
-            http_request_duration_seconds.labels(method=request.method, endpoint=request.url.path).observe(duration)
-
-        return response
+            path = scope.get("path", "")
+            method = scope.get("method", "")
+            http_requests_total.labels(method=method, endpoint=path, status=status_code).inc()
+            http_request_duration_seconds.labels(method=method, endpoint=path).observe(duration)
 
 
-class LoggingContextMiddleware(BaseHTTPMiddleware):
-    """Middleware for adding user_id and session_id to logging context."""
+class LoggingContextMiddleware:
+    """Pure ASGI middleware for adding user_id and session_id to logging context."""
 
-    @override
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """Extract user_id and session_id from authenticated requests and add to logging context.
+    def __init__(self, app: ASGIApp):
+        """Wrap an ASGI application."""
+        self.app = app
 
-        Args:
-            request: The incoming request
-            call_next: The next middleware or route handler
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Extract session_id from JWT and bind to structlog context."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        Returns:
-            Response: The response from the application
-        """
         try:
-            # Clear any existing context from previous requests
             clear_context()
 
-            # Extract token from Authorization header
-            auth_header = request.headers.get("authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                token = auth_header.split(" ")[1]
-
+            headers = dict(scope.get("headers", []))
+            auth_header = headers.get(b"authorization", b"").decode()
+            if auth_header.startswith("Bearer "):
+                token = auth_header.split(" ", 1)[1]
                 try:
-                    # Decode token to get session_id (stored in "sub" claim)
                     payload = jwt.decode(
                         token, settings.jwt.secret_key.get_secret_value(), algorithms=[settings.jwt.algorithm]
                     )
                     session_id = payload.get("sub")
-
                     if session_id:
-                        # Bind session_id to logging context
                         bind_context(session_id=session_id)
-
-                        # Try to get user_id from request state after authentication
-                        # This will be set by the dependency injection if the endpoint uses authentication
-                        # We'll check after the request is processed
-
                 except JWTError:
-                    # Token is invalid, but don't fail the request - let the auth dependency handle it
                     pass
 
-            # Process the request
-            response = await call_next(request)
-
-            # After request processing, check if user info was added to request state
-            if hasattr(request.state, "user_id"):
-                bind_context(user_id=request.state.user_id)
-
-            return response
-
+            await self.app(scope, receive, send)
         finally:
-            # Always clear context after request is complete to avoid leaking to other requests
             clear_context()
 
 
-class ProfilingMiddleware(BaseHTTPMiddleware):
-    """Automatic per-request profiling middleware using pyinstrument.
+class ProfilingMiddleware:
+    """Pure ASGI middleware for per-request profiling using pyinstrument.
 
-    Only active when DEBUG=true. Profiles every request and saves an HTML
-    flamegraph to PROFILING_DIR when the request exceeds
-    PROFILING_THRESHOLD_SECONDS. Files are named {request_id}.html so they
-    can be correlated with logs. /tmp is cleaned up automatically by the OS.
+    Only active when DEBUG=true. Profiles every request and saves a JSON
+    report when the request exceeds PROFILING_THRESHOLD_SECONDS.
     """
 
-    @override
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """Profile every request; save enriched JSON if duration exceeds threshold."""
-        if not PYINSTRUMENT_AVAILABLE:
-            return await call_next(request)
+    def __init__(self, app: ASGIApp):
+        """Wrap an ASGI application."""
+        self.app = app
 
-        # Start all three profilers
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Profile every request; save enriched JSON if duration exceeds threshold."""
+        if scope["type"] != "http" or not PYINSTRUMENT_AVAILABLE:
+            await self.app(scope, receive, send)
+            return
+
         tracemalloc.start()
         cpu_start = time.process_time()
 
         profiler = Profiler(async_mode="enabled")
         with profiler:
-            response = await call_next(request)
+            await self.app(scope, receive, send)
 
-        # Capture metrics immediately after the request
         cpu_ms = round((time.process_time() - cpu_start) * 1000, 2)
         mem_current_kb, mem_peak_kb = (v // 1024 for v in tracemalloc.get_traced_memory())
         snapshot = tracemalloc.take_snapshot()
@@ -174,7 +156,6 @@ class ProfilingMiddleware(BaseHTTPMiddleware):
             settings.logging.profiling_dir.mkdir(parents=True, exist_ok=True)
             filepath = settings.logging.profiling_dir / f"{raw_id}.json"
 
-            # Top 20 memory allocators — exclude profiler and stdlib noise
             _excluded = ("tracemalloc", "pyinstrument", "<frozen", "logging/__init__")
             top_allocs = [
                 {
@@ -188,9 +169,11 @@ class ProfilingMiddleware(BaseHTTPMiddleware):
             ]
 
             call_tree = json.loads(profiler.output(renderer=JSONRenderer()))
+            path = scope.get("path", "")
+            method = scope.get("method", "")
             report = {
                 "request_id": raw_id,
-                "endpoint": f"{request.method} {request.url.path}",
+                "endpoint": f"{method} {path}",
                 "wall_time_ms": wall_ms,
                 "cpu_time_ms": cpu_ms,
                 "io_wait_ms": round(wall_ms - cpu_ms, 2),
@@ -202,13 +185,11 @@ class ProfilingMiddleware(BaseHTTPMiddleware):
             filepath.write_text(json.dumps(report, indent=2))
             logger.debug(
                 "slow_request_profile_saved",
-                path=request.url.path,
-                method=request.method,
+                path=path,
+                method=method,
                 wall_time_ms=wall_ms,
                 cpu_time_ms=cpu_ms,
                 memory_peak_kb=mem_peak_kb,
                 io_wait_ms=round(wall_ms - cpu_ms, 2),
                 profile_file=str(filepath),
             )
-
-        return response

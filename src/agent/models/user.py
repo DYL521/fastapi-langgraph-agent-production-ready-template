@@ -1,10 +1,6 @@
 """This file contains the user model for the application."""
 
-from typing import (
-    TYPE_CHECKING,
-    List,
-    Optional,
-)
+from typing import TYPE_CHECKING
 
 import bcrypt
 from sqlmodel import (
@@ -19,22 +15,13 @@ if TYPE_CHECKING:
 
 
 class User(BaseModel, table=True):
-    """User model for storing user accounts.
+    """User model for storing user accounts."""
 
-    Attributes:
-        id: The primary key
-        email: User's email (unique)
-        hashed_password: Bcrypt hashed password
-        username: Optional display name for the user
-        created_at: When the user was created
-        sessions: Relationship to user's chat sessions
-    """
-
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True)
     hashed_password: str
-    username: Optional[str] = Field(default=None, index=False)
-    sessions: List["Session"] = Relationship(back_populates="user")
+    username: str | None = Field(default=None, index=False)
+    sessions: list["Session"] = Relationship(back_populates="user")
 
     def verify_password(self, password: str) -> bool:
         """Verify if the provided password matches the hash."""
@@ -47,5 +34,6 @@ class User(BaseModel, table=True):
         return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
 
-# Avoid circular imports
-from agent.models.session import Session  # noqa: E402
+# SQLModel/SQLAlchemy requires the related model class to be loaded before
+# relationship resolution. This import ensures Session's mapper is registered.
+from agent.models.session import Session  # noqa: E402, F811
